@@ -1,0 +1,10 @@
+[package]
+name = "testerino"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8"
+bulletproofs = "4.0.0"
+merlin = "3.0.0"
+curve25519-dalek-ng = "4.1.1"
