@@ -102,13 +102,13 @@ impl Signature {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pedersen::Pedersen;
+    use crate::pedersen;
 
     #[test]
     fn test_keypair_generation_1() {
         let keypair = Keypair::generate();
         // Verify that the public key can be reconstructed from the private key
-        let expected_public_key = PublicKey(Pedersen::commit_unblinded(keypair.private));
+        let expected_public_key = PublicKey(pedersen::commit_unblinded(keypair.private));
         assert_eq!(keypair.public, expected_public_key);
     }
 
