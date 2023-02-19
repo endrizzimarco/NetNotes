@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-
 use blake3::Hasher;
 use curve25519_dalek::constants;
 use curve25519_dalek::ristretto::RistrettoPoint;
@@ -17,7 +16,7 @@ pub struct Keypair {
     pub private: PrivateKey,
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Debug)]
 pub struct Signature {
     s: Scalar,
     R: PublicKey,
@@ -27,6 +26,7 @@ impl Keypair {
     pub fn generate() -> Self {
         let private_key = Scalar::random(&mut OsRng);
         let public_key = PublicKey::from_private_key(private_key);
+
         Keypair {
             public: public_key,
             private: private_key,
@@ -35,6 +35,7 @@ impl Keypair {
 
     pub fn from_private_key(private_key: PrivateKey) -> Self {
         let public_key = PublicKey::from_private_key(private_key);
+
         Keypair {
             public: public_key,
             private: private_key,
@@ -57,17 +58,9 @@ impl std::ops::Add for PublicKey {
 }
 
 impl Signature {
-    pub fn new(
-        message: Uuid,
-        nonce: &Keypair,
-        blinding_factor: &Keypair,
-        other_nonce: &PublicKey,
-        other_blinding_factor: PublicKey,
-    ) -> Self {
-        let nonce_sum = nonce.public.0 + other_nonce.0;
-        let blinding_factor_sum = blinding_factor.public.0 + other_blinding_factor.0;
-        let challenge = Self::challenge(message, nonce_sum, blinding_factor_sum);
-        let signature = nonce.private + challenge * blinding_factor.private;
+    pub fn new(nonce: &Keypair, private_key: &PrivateKey, challenge: Scalar) -> Self {
+        // s = r + e * x
+        let signature = nonce.private + challenge * private_key;
 
         Signature {
             s: signature,
@@ -84,29 +77,23 @@ impl Signature {
         Signature { s, R }
     }
 
-    pub fn verify(
-        signature: &Signature,
-        message: Uuid,
-        public_key: &PublicKey,
-        nonce_sum: PublicKey,
-        blinding_factor_sum: PublicKey,
-    ) -> bool {
-        let e = Self::challenge(message, nonce_sum.0, blinding_factor_sum.0);
+    pub fn verify(signature: &Signature, public_key: &PublicKey, e: Scalar) -> bool {
         let sG = PublicKey::from_private_key(signature.s);
         let R = signature.R;
 
-        sG.0 == R.0 + e * public_key.0 // s.G == R + e.P
+        // s.G == R + e.X
+        sG.0 == R.0 + e * public_key.0
     }
 
-    fn challenge(
+    pub fn calculate_challenge(
         message: Uuid,
-        public_nonces: RistrettoPoint,
-        public_blinding_factors: RistrettoPoint,
+        public_nonces: PublicKey,
+        public_keys: PublicKey,
     ) -> Scalar {
         let mut hasher = Hasher::new();
         hasher.update(message.as_bytes());
-        hasher.update(public_nonces.compress().as_bytes());
-        hasher.update(public_blinding_factors.compress().as_bytes());
+        hasher.update(public_nonces.0.compress().as_bytes());
+        hasher.update(public_keys.0.compress().as_bytes());
 
         Scalar::from_bytes_mod_order(*hasher.finalize().as_bytes())
     }
@@ -143,25 +130,17 @@ mod tests {
     fn test_single_signature_verification() {
         let message = Uuid::new_v4();
         let nonce = Keypair::generate();
-        let blinding_factor = Keypair::generate();
+        let secret = Keypair::generate();
         let other_nonce = Keypair::generate().public;
-        let other_blinding_factor = Keypair::generate().public;
+        let other_secret = Keypair::generate().public;
 
-        let signature = Signature::new(
-            message,
-            &nonce,
-            &blinding_factor,
-            &other_nonce,
-            other_blinding_factor,
-        );
+        let public_nonces = nonce.public + other_nonce;
+        let public_keys = secret.public + other_secret;
 
-        assert!(Signature::verify(
-            &signature,
-            message,
-            &blinding_factor.public,
-            nonce.public + other_nonce,
-            blinding_factor.public + other_blinding_factor,
-        ));
+        let challenge = Signature::calculate_challenge(message, public_nonces, public_keys);
+        let signature = Signature::new(&nonce, &secret.private, challenge);
+
+        assert!(Signature::verify(&signature, &secret.public, challenge));
     }
 
     #[test]
@@ -169,101 +148,36 @@ mod tests {
         let message = Uuid::new_v4();
         let nonce1 = Keypair::generate();
         let nonce2 = Keypair::generate();
-        let blinding_factor1 = Keypair::generate();
-        let blinding_factor2 = Keypair::generate();
+        let secret1 = Keypair::generate();
+        let secret2 = Keypair::generate();
 
-        let sig1 = Signature::new(
-            message,
-            &nonce1,
-            &blinding_factor1,
-            &nonce2.public,
-            blinding_factor2.public,
-        );
-        let sig2 = Signature::new(
-            message,
-            &nonce2,
-            &blinding_factor2,
-            &nonce1.public,
-            blinding_factor1.public,
-        );
+        let public_nonces = nonce1.public + nonce2.public;
+        let public_keys = secret1.public + secret2.public;
+        let challenge = Signature::calculate_challenge(message, public_nonces, public_keys);
+
+        let sig1 = Signature::new(&nonce1, &secret1.private, challenge);
+        let sig2 = Signature::new(&nonce2, &secret2.private, challenge);
 
         let aggregated_sig = Signature::aggregate(vec![sig1, sig2]);
-        let public_key_sum = blinding_factor1.public + blinding_factor2.public;
 
-        assert!(Signature::verify(
-            &aggregated_sig,
-            message,
-            &public_key_sum,
-            nonce1.public + nonce2.public,
-            blinding_factor1.public + blinding_factor2.public,
-        ));
-    }
-
-    #[test]
-    // TODO: should nonce be generated from within??
-    fn test_signature_new() {
-        let message1 = Uuid::new_v4();
-        let message2 = Uuid::new_v4();
-        let nonce1 = Keypair::generate();
-        let nonce2 = Keypair::generate();
-        let blinding_factor1 = Keypair::generate();
-        let blinding_factor2 = Keypair::generate();
-        let other_nonce = PublicKey::from_private_key(Scalar::zero());
-        let other_blinding_factor = PublicKey::from_private_key(Scalar::zero());
-
-        let signature1 = Signature::new(
-            message1,
-            &nonce1,
-            &blinding_factor1,
-            &other_nonce,
-            other_blinding_factor,
-        );
-        let signature2 = Signature::new(
-            message2,
-            &nonce2,
-            &blinding_factor2,
-            &other_nonce,
-            other_blinding_factor,
-        );
-
-        assert_ne!(
-            signature1,
-            Signature::new(
-                message1,
-                &Keypair::generate(),
-                &blinding_factor1,
-                &other_nonce,
-                other_blinding_factor
-            )
-        );
-        assert_ne!(signature1, signature2);
-        assert_ne!(
-            signature2,
-            Signature::new(
-                message2,
-                &Keypair::generate(),
-                &blinding_factor2,
-                &other_nonce,
-                other_blinding_factor
-            )
-        );
+        assert!(Signature::verify(&aggregated_sig, &public_keys, challenge));
     }
 
     #[test]
     fn test_signature_verify_invalid() {
+        // Generate the original message and key pairs
         let message = Uuid::new_v4();
         let nonce = Keypair::generate();
-        let blinding_factor = Keypair::generate();
+        let secret = Keypair::generate();
         let other_nonce = Keypair::generate().public;
-        let other_blinding_factor = Keypair::generate().public;
+        let other_secret = Keypair::generate().public;
 
-        let signature = Signature::new(
-            message,
-            &nonce,
-            &blinding_factor,
-            &other_nonce,
-            other_blinding_factor,
-        );
+        let public_nonces = nonce.public + other_nonce;
+        let public_keys = secret.public + other_secret;
+        let challenge = Signature::calculate_challenge(message, public_nonces, public_keys);
+
+        // Generate the original signature
+        let signature = Signature::new(&nonce, &secret.private, challenge);
 
         // Modify the signature to make it invalid
         let invalid_signature = Signature {
@@ -272,30 +186,15 @@ mod tests {
         };
 
         // Modify the message to make it invalid
-        let tampered_message = Uuid::new_v4();
+        let tampered_message =
+            Signature::calculate_challenge(Uuid::new_v4(), public_nonces, public_keys);
 
-        let valid = Signature::verify(
-            &signature,
-            message,
-            &blinding_factor.public,
-            nonce.public + other_nonce,
-            blinding_factor.public + other_blinding_factor,
-        );
-        let invalid1 = Signature::verify(
-            &invalid_signature,
-            message,
-            &signature.R,
-            nonce.public + other_nonce,
-            blinding_factor.public + other_blinding_factor,
-        );
-        let invalid2 = Signature::verify(
-            &signature,
-            tampered_message,
-            &signature.R,
-            nonce.public + other_nonce,
-            blinding_factor.public + other_blinding_factor,
-        );
+        // Verify the original and modified signatures
+        let valid = Signature::verify(&signature, &secret.public, challenge);
+        let invalid1 = Signature::verify(&invalid_signature, &secret.public, challenge);
+        let invalid2 = Signature::verify(&signature, &secret.public, tampered_message);
 
+        // Assert the results
         assert!(valid);
         assert!(!invalid1);
         assert!(!invalid2);
