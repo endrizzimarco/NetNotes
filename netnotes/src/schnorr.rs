@@ -7,7 +7,7 @@ use rand::rngs::OsRng;
 use uuid::Uuid;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub struct PublicKey(RistrettoPoint);
+pub struct PublicKey(pub RistrettoPoint);
 
 pub type PrivateKey = Scalar;
 
@@ -68,7 +68,7 @@ impl Signature {
         }
     }
 
-    pub fn aggregate(partial_sigs: Vec<Signature>) -> Self {
+    pub fn aggregate(partial_sigs: Vec<&Signature>) -> Self {
         let (s, R) = partial_sigs.iter().fold(
             (Scalar::zero(), PublicKey::from_private_key(Scalar::zero())),
             |acc, sig| (acc.0 + sig.s, acc.1 + sig.R),
@@ -86,9 +86,9 @@ impl Signature {
     }
 
     pub fn calculate_challenge(
-        message: Uuid,
-        public_nonces: PublicKey,
-        public_keys: PublicKey,
+        message: &Uuid,
+        public_nonces: &PublicKey,
+        public_keys: &PublicKey,
     ) -> Scalar {
         let mut hasher = Hasher::new();
         hasher.update(message.as_bytes());
@@ -137,7 +137,7 @@ mod tests {
         let public_nonces = nonce.public + other_nonce;
         let public_keys = secret.public + other_secret;
 
-        let challenge = Signature::calculate_challenge(message, public_nonces, public_keys);
+        let challenge = Signature::calculate_challenge(&message, &public_nonces, &public_keys);
         let signature = Signature::new(&nonce, &secret.private, challenge);
 
         assert!(Signature::verify(&signature, &secret.public, challenge));
@@ -153,12 +153,12 @@ mod tests {
 
         let public_nonces = nonce1.public + nonce2.public;
         let public_keys = secret1.public + secret2.public;
-        let challenge = Signature::calculate_challenge(message, public_nonces, public_keys);
+        let challenge = Signature::calculate_challenge(&message, &public_nonces, &public_keys);
 
         let sig1 = Signature::new(&nonce1, &secret1.private, challenge);
         let sig2 = Signature::new(&nonce2, &secret2.private, challenge);
 
-        let aggregated_sig = Signature::aggregate(vec![sig1, sig2]);
+        let aggregated_sig = Signature::aggregate(vec![&sig1, &sig2]);
 
         assert!(Signature::verify(&aggregated_sig, &public_keys, challenge));
     }
@@ -174,7 +174,7 @@ mod tests {
 
         let public_nonces = nonce.public + other_nonce;
         let public_keys = secret.public + other_secret;
-        let challenge = Signature::calculate_challenge(message, public_nonces, public_keys);
+        let challenge = Signature::calculate_challenge(&message, &public_nonces, &public_keys);
 
         // Generate the original signature
         let signature = Signature::new(&nonce, &secret.private, challenge);
@@ -187,7 +187,7 @@ mod tests {
 
         // Modify the message to make it invalid
         let tampered_message =
-            Signature::calculate_challenge(Uuid::new_v4(), public_nonces, public_keys);
+            Signature::calculate_challenge(&Uuid::new_v4(), &public_nonces, &public_keys);
 
         // Verify the original and modified signatures
         let valid = Signature::verify(&signature, &secret.public, challenge);

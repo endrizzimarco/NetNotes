@@ -2,6 +2,9 @@ mod block;
 use block::Block;
 mod blockchain;
 use blockchain::Blockchain;
+mod mimblewimble;
+mod pedersen;
+mod schnorr;
 
 fn main() {
     let mut block = Block::new(
