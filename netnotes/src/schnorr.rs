@@ -4,7 +4,6 @@ use curve25519_dalek::constants;
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 use rand::rngs::OsRng;
-use uuid::Uuid;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct PublicKey(pub RistrettoPoint);
@@ -19,7 +18,7 @@ pub struct Keypair {
 #[derive(PartialEq, Debug)]
 pub struct Signature {
     s: Scalar,
-    R: PublicKey,
+    pub R: PublicKey,
 }
 
 impl Keypair {
@@ -85,13 +84,9 @@ impl Signature {
         sG.0 == R.0 + e * public_key.0
     }
 
-    pub fn calculate_challenge(
-        message: &Uuid,
-        public_nonces: &PublicKey,
-        public_keys: &PublicKey,
-    ) -> Scalar {
+    pub fn calculate_challenge(public_nonces: &PublicKey, public_keys: &PublicKey) -> Scalar {
         let mut hasher = Hasher::new();
-        hasher.update(message.as_bytes());
+        hasher.update("".as_bytes()); // sign on empty message
         hasher.update(public_nonces.0.compress().as_bytes());
         hasher.update(public_keys.0.compress().as_bytes());
 
@@ -128,7 +123,6 @@ mod tests {
 
     #[test]
     fn test_single_signature_verification() {
-        let message = Uuid::new_v4();
         let nonce = Keypair::generate();
         let secret = Keypair::generate();
         let other_nonce = Keypair::generate().public;
@@ -137,7 +131,7 @@ mod tests {
         let public_nonces = nonce.public + other_nonce;
         let public_keys = secret.public + other_secret;
 
-        let challenge = Signature::calculate_challenge(&message, &public_nonces, &public_keys);
+        let challenge = Signature::calculate_challenge(&public_nonces, &public_keys);
         let signature = Signature::new(&nonce, &secret.private, challenge);
 
         assert!(Signature::verify(&signature, &secret.public, challenge));
@@ -145,7 +139,6 @@ mod tests {
 
     #[test]
     fn test_aggregated_signature_verification() {
-        let message = Uuid::new_v4();
         let nonce1 = Keypair::generate();
         let nonce2 = Keypair::generate();
         let secret1 = Keypair::generate();
@@ -153,7 +146,7 @@ mod tests {
 
         let public_nonces = nonce1.public + nonce2.public;
         let public_keys = secret1.public + secret2.public;
-        let challenge = Signature::calculate_challenge(&message, &public_nonces, &public_keys);
+        let challenge = Signature::calculate_challenge(&public_nonces, &public_keys);
 
         let sig1 = Signature::new(&nonce1, &secret1.private, challenge);
         let sig2 = Signature::new(&nonce2, &secret2.private, challenge);
@@ -166,7 +159,6 @@ mod tests {
     #[test]
     fn test_signature_verify_invalid() {
         // Generate the original message and key pairs
-        let message = Uuid::new_v4();
         let nonce = Keypair::generate();
         let secret = Keypair::generate();
         let other_nonce = Keypair::generate().public;
@@ -174,7 +166,7 @@ mod tests {
 
         let public_nonces = nonce.public + other_nonce;
         let public_keys = secret.public + other_secret;
-        let challenge = Signature::calculate_challenge(&message, &public_nonces, &public_keys);
+        let challenge = Signature::calculate_challenge(&public_nonces, &public_keys);
 
         // Generate the original signature
         let signature = Signature::new(&nonce, &secret.private, challenge);
@@ -186,8 +178,11 @@ mod tests {
         };
 
         // Modify the message to make it invalid
-        let tampered_message =
-            Signature::calculate_challenge(&Uuid::new_v4(), &public_nonces, &public_keys);
+        let mut hasher = Hasher::new();
+        hasher.update("tampered".as_bytes());
+        hasher.update(public_nonces.0.compress().as_bytes());
+        hasher.update(public_keys.0.compress().as_bytes());
+        let tampered_message = Scalar::from_bytes_mod_order(*hasher.finalize().as_bytes());
 
         // Verify the original and modified signatures
         let valid = Signature::verify(&signature, &secret.public, challenge);
