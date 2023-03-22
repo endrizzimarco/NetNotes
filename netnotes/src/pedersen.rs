@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 use lazy_static::lazy_static;
@@ -14,12 +15,15 @@ pub fn commit(value: Scalar, r: Scalar) -> Commitment {
     GENS.commit(&value, &r).unwrap()
 }
 
-pub fn commit_unblinded(value: Scalar) -> Commitment {
+pub fn commit_G(value: Scalar) -> Commitment {
     GENS.commit(&Scalar::zero(), &value).unwrap()
 }
 
+pub fn commit_H(value: Scalar) -> Commitment {
+    GENS.commit(&value, &Scalar::zero()).unwrap()
+}
+
 #[cfg(test)]
-#[allow(non_snake_case)]
 mod tests {
     use super::*;
     use curve25519_dalek::constants;
@@ -45,7 +49,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pedersen_commitment_unblinded() {
+    fn test_pedersen_commitment_unblinded_G() {
         // set up G
         let G = constants::RISTRETTO_BASEPOINT_POINT;
 
@@ -54,7 +58,24 @@ mod tests {
         let expected = value * G;
 
         // compute the actual commitment using the commit function
-        let commitment = commit_unblinded(value);
+        let commitment = commit_G(value);
+
+        // check if the actual commitment matches the expected commitment
+        assert_eq!(commitment.compress(), expected.compress());
+    }
+
+    #[test]
+    fn test_pedersen_commitment_unblinded_H() {
+        // set up G
+        let G = constants::RISTRETTO_BASEPOINT_POINT;
+        let H = RistrettoPoint::hash_from_bytes::<Sha3_512>(G.compress().as_bytes());
+
+        // compute the expected commitment with random value and r
+        let value = Scalar::random(&mut OsRng);
+        let expected = value * H;
+
+        // compute the actual commitment using the commit function
+        let commitment = commit_H(value);
 
         // check if the actual commitment matches the expected commitment
         assert_eq!(commitment.compress(), expected.compress());
@@ -104,7 +125,7 @@ mod tests {
         let expected = value * G;
 
         // compute the actual commitment using the commit function
-        let commitment = commit_unblinded(value);
+        let commitment = commit_G(value);
 
         // check if the actual commitment matches the expected commitment
         assert_eq!(commitment.compress(), expected.compress());
@@ -112,7 +133,7 @@ mod tests {
         // check homorphic properties
         let value2 = Scalar::random(&mut OsRng);
         let expected2 = value2 * G;
-        let commitment2 = commit_unblinded(value2);
+        let commitment2 = commit_G(value2);
 
         // check if the actual commitment matches the expected commitment
         assert_eq!(commitment2.compress(), expected2.compress());
