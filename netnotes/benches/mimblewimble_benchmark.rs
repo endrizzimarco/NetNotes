@@ -4,7 +4,7 @@ use netnotes::mimblewimble::{ResponseData, SendData, Transaction};
 use netnotes::pedersen;
 use rand::rngs::OsRng;
 
-fn simu_mw_transaction(blinding_factors: Vec<Scalar>) -> Transaction {
+fn gen_mw_transaction(blinding_factors: Vec<Scalar>) -> Transaction {
     // create a vector of random values same size of blinding_factors vector
     let values = blinding_factors
         .iter()
@@ -34,14 +34,42 @@ fn simu_mw_transaction(blinding_factors: Vec<Scalar>) -> Transaction {
     transaction
 }
 
-pub fn criterion_benchmark(c: &mut Criterion) {
-    let blinding_factors = (0..20)
+fn gen_blinding_factors(n: u32) -> Vec<Scalar> {
+    (0..n)
         .map(|_| Scalar::random(&mut OsRng))
-        .collect::<Vec<Scalar>>();
-    c.bench_function("mw_10", |b| {
-        b.iter(|| simu_mw_transaction(black_box(blinding_factors.clone())))
+        .collect::<Vec<Scalar>>()
+}
+
+pub fn mimblewimble_tx_gen_benchmark(c: &mut Criterion) {
+    let bf_small = gen_blinding_factors(2u32.pow(10));
+    let bf_medium = gen_blinding_factors(2u32.pow(14));
+    let bf_large = gen_blinding_factors(2u32.pow(16));
+
+    c.bench_function("mw_gen:2^10", |b| {
+        b.iter(|| gen_mw_transaction(black_box(bf_small.clone())))
+    });
+    c.bench_function("mw_gen:2^14", |b| {
+        b.iter(|| gen_mw_transaction(black_box(bf_medium.clone())))
+    });
+    c.bench_function("mw_gen:2^16", |b| {
+        b.iter(|| gen_mw_transaction(black_box(bf_large.clone())))
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
+pub fn mimblewimble_tx_verify_benchmark(c: &mut Criterion) {
+    let bf_small = gen_blinding_factors(2u32.pow(10));
+    let bf_medium = gen_blinding_factors(2u32.pow(14));
+    let bf_large = gen_blinding_factors(2u32.pow(16));
+
+    let tx_small = gen_mw_transaction(bf_small.clone());
+    let tx_medium = gen_mw_transaction(bf_medium.clone());
+    let tx_large = gen_mw_transaction(bf_large.clone());
+
+    c.bench_function("mw_verify:2^10", |b| b.iter(|| tx_small.verify()));
+    c.bench_function("mw_verify:2^14", |b| b.iter(|| tx_medium.verify()));
+    c.bench_function("mw_verify:2^16", |b| b.iter(|| tx_large.verify()));
+}
+
+criterion_group!(gen_benches, mimblewimble_tx_gen_benchmark);
+criterion_group!(verify_benches, mimblewimble_tx_verify_benchmark);
+criterion_main!(gen_benches, verify_benches);
