@@ -192,8 +192,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // TODO: aswell as send and response tests + should fail when amount is wrong etc
-    fn test_init_transaction() {
+    fn test_send_transaction() {
         // Arrange
         let amount = Scalar::from(100u64);
         let change = Scalar::from(20u64);
@@ -202,13 +201,18 @@ mod tests {
             pedersen::commit(Scalar::from(100u64), Scalar::from(10u64)),
             pedersen::commit(Scalar::from(100u64), Scalar::from(15u64)),
         ];
-
-        // Act
         let tx_data = Transaction::init(amount, change, input_blinding_factors, inputs);
 
+        // Act
+        let send_data = tx_data.send();
+
         // Assert
-        assert_eq!(tx_data.amount, amount);
-        // assert_eq!(tx_data.inputs, inputs);
+        assert_eq!(send_data.amount, amount);
+        assert_eq!(
+            send_data.public_blinding_diff,
+            tx_data.blinding_keypair.public
+        );
+        assert_eq!(send_data.public_nonce, tx_data.nonce_keypair.public);
     }
 
     #[test]
@@ -257,6 +261,106 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Signature verification failed")]
+    fn test_incorrect_response() {
+        // mock tx data
+        let tx_data = TxData {
+            inputs: vec![pedersen::commit(Scalar::from(150u64), Scalar::from(10u64))],
+            amount: Scalar::from(100u64),
+            change_output: pedersen::commit(Scalar::from(50u64), Scalar::from(5u64)),
+            nonce_keypair: Keypair::generate(),
+            blinding_keypair: Keypair::from_private_key(Scalar::from(5u64)),
+        };
+
+        let other_nonce = Keypair::generate();
+        let other_blinding = Keypair::from_private_key(Scalar::from(6u64));
+        let output_commitment = pedersen::commit(Scalar::from(100u64), other_blinding.private);
+
+        let challenge = Signature::calculate_challenge(
+            &(tx_data.nonce_keypair.public + other_nonce.public),
+            &(tx_data.blinding_keypair.public + other_blinding.public),
+        );
+
+        // mock response data
+        let response_data = ResponseData {
+            partial_sig: Signature::new(&other_nonce, &other_nonce.private, challenge),
+            output_commitment,
+            public_nonce: other_nonce.public,
+            public_blinding: other_blinding.public,
+        };
+
+        // Act
+        ResponseData::finalise(&tx_data, &response_data);
+    }
+
+    #[test]
+    fn test_correct_transaction() {
+        let ten = Scalar::from(10u64);
+        let keypair = &Keypair::from_private_key(ten);
+        let challenge =
+            Signature::calculate_challenge(&keypair.public, &PublicKey::from_private_key(ten));
+        let signature = Signature::new(keypair, &ten, challenge);
+
+        let transaction = Transaction {
+            inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
+            outputs: vec![
+                pedersen::commit(Scalar::from(50u64), ten),
+                pedersen::commit(Scalar::from(100u64), ten),
+            ],
+            kernel: Kernel {
+                excess: PublicKey::from_private_key(ten),
+                signature,
+            },
+        };
+
+        assert!(transaction.verify());
+    }
+
+    #[test]
+    // wrong amount
+    fn test_incorrect_transaction_1() {
+        let ten = Scalar::from(10u64);
+        let keypair = &Keypair::from_private_key(ten);
+        let challenge =
+            Signature::calculate_challenge(&keypair.public, &PublicKey::from_private_key(ten));
+        let signature = Signature::new(keypair, &ten, challenge);
+
+        let transaction = Transaction {
+            inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
+            outputs: vec![pedersen::commit(Scalar::from(1000u64), ten)],
+            kernel: Kernel {
+                excess: PublicKey::from_private_key(ten),
+                signature,
+            },
+        };
+
+        assert!(!transaction.verify());
+    }
+
+    #[test]
+    // wrong signature
+    fn test_incorrect_transaction_2() {
+        let ten = Scalar::from(10u64);
+        let keypair = &Keypair::from_private_key(ten);
+        let challenge = Signature::calculate_challenge(
+            &keypair.public,
+            &PublicKey::from_private_key(Scalar::one()),
+        );
+        let signature = Signature::new(keypair, &ten, challenge);
+
+        let transaction = Transaction {
+            inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
+            outputs: vec![pedersen::commit(Scalar::from(1000u64), ten)],
+            kernel: Kernel {
+                excess: PublicKey::from_private_key(ten),
+                signature,
+            },
+        };
+
+        assert!(!transaction.verify());
+    }
+
+    #[test]
     // Test the sum() function for point addition
     fn test_point_addition() {
         let points = vec![
@@ -267,6 +371,7 @@ mod tests {
         let sum = points
             .iter()
             .fold(RistrettoPoint::default(), |acc, p| acc + p);
+
         assert_eq!(points.sum().unwrap(), sum);
     }
 }
