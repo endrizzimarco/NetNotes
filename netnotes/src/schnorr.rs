@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use super::pedersen::{commit_G, commit_J, Commitment};
+use super::pedersen::{commit, commit_G, commit_H, commit_J, Commitment};
 use blake3::Hasher;
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -154,7 +154,8 @@ impl Signature {
 }
 
 impl GeneralisedSignature {
-    pub fn new(
+    // For signatures in the form r.G + s.J
+    pub fn new_excess_proof(
         nonce1: &Keypair,
         nonce2: &KeypairJ,
         value: &PrivateKey,
@@ -186,7 +187,11 @@ impl GeneralisedSignature {
         GeneralisedSignature { s1, s2, R }
     }
 
-    pub fn verify(signature: &GeneralisedSignature, commitment: Commitment, e: Scalar) -> bool {
+    pub fn verify_excess_proof(
+        signature: &GeneralisedSignature,
+        commitment: Commitment,
+        e: Scalar,
+    ) -> bool {
         let s1G = PublicKey::from_private_key(signature.s1);
         let s2J = PublicKeyJ::from_private_key(signature.s2);
         let R = signature.R;
@@ -195,7 +200,28 @@ impl GeneralisedSignature {
         s1G.0 + s2J.0 == R.0 + e * commitment
     }
 
-    pub fn calculate_challenge(commitment: Commitment, nonces_commitment: &Commitment) -> Scalar {
+    // For signatures in the form r.G + v.H
+    pub fn new_input_proof(value: PrivateKey, blinding_factor: PrivateKey) -> GeneralisedSignature {
+        let nonce1 = Scalar::random(&mut OsRng);
+        let nonce2 = Scalar::random(&mut OsRng);
+        let commitment = commit(value, blinding_factor);
+        let nonces_commitment = commit(nonce1, nonce2);
+
+        let challenge = Self::calculate_challenge(&commitment, &nonces_commitment);
+        let s1 = nonce1 + challenge * value;
+        let s2 = nonce2 + challenge * blinding_factor;
+        let R = PublicKey(nonces_commitment);
+
+        GeneralisedSignature { s1, s2, R }
+    }
+
+    // s1.H + s2.G == R + e.C
+    pub fn verify_input_proof(signature: &GeneralisedSignature, commitment: Commitment) -> bool {
+        let e = Self::calculate_challenge(&commitment, &signature.R.0);
+        commit_H(signature.s1) + commit_G(signature.s2) == signature.R.0 + e * commitment
+    }
+
+    pub fn calculate_challenge(commitment: &Commitment, nonces_commitment: &Commitment) -> Scalar {
         let mut hasher = Hasher::new();
         hasher.update("".as_bytes()); // sign on empty message
         hasher.update(commitment.compress().as_bytes());
@@ -296,8 +322,8 @@ mod tests {
             blinding_factor.private + other_factor.private,
             secret_value.private + other_secret.private,
         );
-        let challenge = GeneralisedSignature::calculate_challenge(C, &R);
-        let signature = GeneralisedSignature::new(
+        let challenge = GeneralisedSignature::calculate_challenge(&C, &R);
+        let signature = GeneralisedSignature::new_excess_proof(
             &nonce_1,
             &nonce_2,
             &secret_value.private,
@@ -305,7 +331,7 @@ mod tests {
             challenge,
         );
 
-        assert!(GeneralisedSignature::verify(
+        assert!(GeneralisedSignature::verify_excess_proof(
             &signature,
             secret_value.public.0 + blinding_factor.public.0,
             challenge
@@ -350,16 +376,16 @@ mod tests {
             blinding_factor.private + other_factor.private,
             secret_value.private + other_secret.private,
         );
-        let challenge = GeneralisedSignature::calculate_challenge(C, &R);
+        let challenge = GeneralisedSignature::calculate_challenge(&C, &R);
 
-        let sig1 = GeneralisedSignature::new(
+        let sig1 = GeneralisedSignature::new_excess_proof(
             &nonce_1,
             &nonce_2,
             &secret_value.private,
             &blinding_factor.private,
             challenge,
         );
-        let sig2 = GeneralisedSignature::new(
+        let sig2 = GeneralisedSignature::new_excess_proof(
             &nonce_1,
             &nonce_2,
             &other_secret.private,
@@ -373,7 +399,7 @@ mod tests {
             + other_secret.public.0
             + other_factor.public.0;
 
-        assert!(GeneralisedSignature::verify(
+        assert!(GeneralisedSignature::verify_excess_proof(
             &aggregated_sig,
             public_keys,
             challenge
@@ -417,5 +443,19 @@ mod tests {
         assert!(valid);
         assert!(!invalid1);
         assert!(!invalid2);
+    }
+
+    #[test]
+    fn test_input_proof_signature() {
+        // GeneralisedSignature::new_input_proof
+        let secret_value = Scalar::random(&mut rand::thread_rng());
+        let blinding_factor = Scalar::random(&mut rand::thread_rng());
+
+        let proof = GeneralisedSignature::new_input_proof(secret_value, blinding_factor);
+
+        assert!(GeneralisedSignature::verify_input_proof(
+            &proof,
+            commit(secret_value, blinding_factor)
+        ));
     }
 }
