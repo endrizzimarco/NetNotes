@@ -15,9 +15,10 @@ lazy_static! {
 }
 
 pub type Commitment = RistrettoPoint;
+pub type GeneralisedCommitment = RistrettoPoint;
 
 // s.J + v.H + r.G
-pub fn generalised_commit(value: Scalar, r: Scalar, s: Scalar) -> Commitment {
+pub fn generalised_commit(value: Scalar, r: Scalar, s: Scalar) -> GeneralisedCommitment {
     commit_J(s) + GENS.commit(&value, &r).unwrap()
 }
 
