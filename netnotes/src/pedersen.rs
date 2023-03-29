@@ -8,7 +8,7 @@ use sha3::Keccak512;
 
 lazy_static! {
     // supports sets of up to 32 commitments in the one-out-of-many proof
-    static ref GENS: ProofGens = ProofGens::new(5).unwrap();
+    pub static ref GENS: ProofGens = ProofGens::new(5).unwrap();
     static ref J: RistrettoBasepointTable = RistrettoBasepointTable::create(
         &RistrettoPoint::hash_from_bytes::<Keccak512>(G.compress().as_bytes())
     );
@@ -17,9 +17,9 @@ lazy_static! {
 pub type Commitment = RistrettoPoint;
 pub type GeneralisedCommitment = RistrettoPoint;
 
-// s.J + v.H + r.G
+// s.G + r.H + v.J
 pub fn generalised_commit(value: Scalar, r: Scalar, s: Scalar) -> GeneralisedCommitment {
-    commit_J(s) + GENS.commit(&value, &r).unwrap()
+    GENS.commit(&r, &s).unwrap() + commit_J(value)
 }
 
 // v.H + r.G
@@ -27,7 +27,7 @@ pub fn commit(value: Scalar, r: Scalar) -> Commitment {
     GENS.commit(&value, &r).unwrap()
 }
 
-// s.J + v.H
+// v.J + r.H
 pub fn commit_hj(value: Scalar, r: Scalar) -> Commitment {
     commit_H(value) + commit_J(r)
 }
@@ -109,9 +109,9 @@ mod tests {
         let scalar2 = Scalar::random(&mut OsRng);
         let scalar3 = Scalar::random(&mut OsRng);
 
-        let G_commitment = commit_G(scalar2);
-        let H_commitment = commit_H(scalar1);
-        let J_commitment = commit_J(scalar3);
+        let G_commitment = commit_G(scalar3);
+        let H_commitment = commit_H(scalar2);
+        let J_commitment = commit_J(scalar1);
         let expected = generalised_commit(scalar1, scalar2, scalar3);
 
         // check if the generalised commitment matches the sum of individual commitments
@@ -125,10 +125,10 @@ mod tests {
         let scalar3 = Scalar::random(&mut OsRng);
 
         let generalised_commitment = generalised_commit(scalar1, scalar2, scalar3);
-        let HJ_commitment = commit_hj(scalar1, scalar3);
-        let expected = commit(Scalar::zero(), scalar2);
+        let HJ_commitment = commit_hj(scalar2, scalar1);
+        let expected = commit(Scalar::zero(), scalar3);
 
-        // s.J + v.H + r.G - (s.J + v.H) = r.G
+        // s.G + r.H + v.J - (v.J + r.H) = s.G
         assert_eq!(expected, generalised_commitment - HJ_commitment);
     }
 
