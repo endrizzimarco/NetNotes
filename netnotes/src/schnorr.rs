@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use super::pedersen::{commit, commit_G, commit_H, commit_J, Commitment};
+use super::pedersen::{commit_G, commit_H, commit_J, commit_hj, Commitment};
 use blake3::Hasher;
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -10,15 +10,15 @@ pub type PrivateKey = Scalar;
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct PublicKey(pub RistrettoPoint); // privateKey * G
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub struct PublicKeyJ(pub RistrettoPoint); // privateKey * H
+pub struct PublicKeyH(pub RistrettoPoint); // privateKey * H
 
 pub struct Keypair {
     pub public: PublicKey,
     pub private: PrivateKey,
 }
 
-pub struct KeypairJ {
-    pub public: PublicKeyJ,
+pub struct KeypairH {
+    pub public: PublicKeyH,
     pub private: PrivateKey,
 }
 
@@ -55,21 +55,21 @@ impl Keypair {
     }
 }
 
-impl KeypairJ {
+impl KeypairH {
     pub fn generate() -> Self {
         let private_key = Scalar::random(&mut OsRng);
-        let public_key = PublicKeyJ::from_private_key(private_key);
+        let public_key = PublicKeyH::from_private_key(private_key);
 
-        KeypairJ {
+        KeypairH {
             public: public_key,
             private: private_key,
         }
     }
 
     pub fn from_private_key(private_key: PrivateKey) -> Self {
-        let public_key = PublicKeyJ::from_private_key(private_key);
+        let public_key = PublicKeyH::from_private_key(private_key);
 
-        KeypairJ {
+        KeypairH {
             public: public_key,
             private: private_key,
         }
@@ -82,9 +82,9 @@ impl PublicKey {
     }
 }
 
-impl PublicKeyJ {
+impl PublicKeyH {
     pub fn from_private_key(private_key: PrivateKey) -> Self {
-        PublicKeyJ(commit_J(private_key))
+        PublicKeyH(commit_H(private_key))
     }
 }
 
@@ -97,20 +97,20 @@ impl std::ops::Add for PublicKey {
     }
 }
 
-// PublicKeyJ + PublicKeyJ
-impl std::ops::Add for PublicKeyJ {
-    type Output = PublicKeyJ;
+// PublicKeyH + PublicKeyH
+impl std::ops::Add for PublicKeyH {
+    type Output = PublicKeyH;
 
-    fn add(self, other: PublicKeyJ) -> PublicKeyJ {
-        PublicKeyJ(self.0 + other.0)
+    fn add(self, other: PublicKeyH) -> PublicKeyH {
+        PublicKeyH(self.0 + other.0)
     }
 }
 
-// PublicKey + PublicKeyJ
-impl std::ops::Add<PublicKeyJ> for PublicKey {
+// PublicKey + PublicKeyH
+impl std::ops::Add<PublicKeyH> for PublicKey {
     type Output = PublicKey;
 
-    fn add(self, other: PublicKeyJ) -> PublicKey {
+    fn add(self, other: PublicKeyH) -> PublicKey {
         PublicKey(self.0 + other.0)
     }
 }
@@ -135,9 +135,9 @@ impl Signature {
         Signature { s, R }
     }
 
-    pub fn verify(signature: &Signature, public_key: &PublicKey, e: Scalar) -> bool {
-        let sG = PublicKey::from_private_key(signature.s);
-        let R = signature.R;
+    pub fn verify(&self, public_key: &PublicKey, e: Scalar) -> bool {
+        let sG = PublicKey::from_private_key(self.s);
+        let R = self.R;
 
         // s.G == R + e.X
         sG.0 == R.0 + e * public_key.0
@@ -154,23 +154,23 @@ impl Signature {
 }
 
 impl GeneralisedSignature {
-    // For signatures in the form r.G + s.J
+    // For signatures in the form s.G + r.H
     pub fn new_excess_proof(
-        nonce1: &Keypair,
-        nonce2: &KeypairJ,
+        nonce_G: &Keypair,
+        nonce_H: &KeypairH,
         value: &PrivateKey,
         blinding_factor: &PrivateKey,
         challenge: Scalar,
     ) -> Self {
         // s1 = a + e * v
-        let signature1 = nonce1.private + challenge * value;
+        let signature1 = nonce_G.private + challenge * value;
         // s2 = b + e * r
-        let signature2 = nonce2.private + challenge * blinding_factor;
+        let signature2 = nonce_H.private + challenge * blinding_factor;
 
         GeneralisedSignature {
             s1: signature1,
             s2: signature2,
-            R: nonce1.public + nonce2.public,
+            R: nonce_G.public + nonce_H.public,
         }
     }
 
@@ -187,38 +187,34 @@ impl GeneralisedSignature {
         GeneralisedSignature { s1, s2, R }
     }
 
-    pub fn verify_excess_proof(
-        signature: &GeneralisedSignature,
-        commitment: Commitment,
-        e: Scalar,
-    ) -> bool {
-        let s1G = PublicKey::from_private_key(signature.s1);
-        let s2J = PublicKeyJ::from_private_key(signature.s2);
-        let R = signature.R;
+    pub fn verify_excess_proof(&self, commitment: Commitment, e: Scalar) -> bool {
+        let s1G = PublicKey::from_private_key(self.s1);
+        let s2J = PublicKeyH::from_private_key(self.s2);
+        let R = self.R;
 
         // s1.G + s2.J == R + e.C
         s1G.0 + s2J.0 == R.0 + e * commitment
     }
 
-    // For signatures in the form r.G + v.H
+    // For signatures in the form r.H + v.J
     pub fn new_input_proof(value: PrivateKey, blinding_factor: PrivateKey) -> GeneralisedSignature {
-        let nonce1 = Scalar::random(&mut OsRng);
-        let nonce2 = Scalar::random(&mut OsRng);
-        let commitment = commit(value, blinding_factor);
-        let nonces_commitment = commit(nonce1, nonce2);
+        let nonce_H = Scalar::random(&mut OsRng);
+        let nonce_J = Scalar::random(&mut OsRng);
+        let commitment = commit_hj(blinding_factor, value);
+        let nonces_commitment = commit_hj(nonce_H, nonce_J);
 
         let challenge = Self::calculate_challenge(&commitment, &nonces_commitment);
-        let s1 = nonce1 + challenge * value;
-        let s2 = nonce2 + challenge * blinding_factor;
+        let s1 = nonce_H + challenge * blinding_factor;
+        let s2 = nonce_J + challenge * value;
         let R = PublicKey(nonces_commitment);
 
         GeneralisedSignature { s1, s2, R }
     }
 
-    // s1.H + s2.G == R + e.C
-    pub fn verify_input_proof(signature: &GeneralisedSignature, commitment: Commitment) -> bool {
-        let e = Self::calculate_challenge(&commitment, &signature.R.0);
-        commit_H(signature.s1) + commit_G(signature.s2) == signature.R.0 + e * commitment
+    // s1.H + s2.J == R + e.C
+    pub fn verify_input_proof(&self, commitment: &Commitment) -> bool {
+        let e = Self::calculate_challenge(&commitment, &self.R.0);
+        commit_H(self.s1) + commit_J(self.s2) == self.R.0 + e * commitment
     }
 
     pub fn calculate_challenge(commitment: &Commitment, nonces_commitment: &Commitment) -> Scalar {
@@ -235,13 +231,13 @@ impl GeneralisedSignature {
 mod tests {
     use super::*;
     use crate::pedersen::commit_hj;
-    use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
-    use sha3::Keccak512;
+    use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT as G;
+    use sha3::Sha3_512;
 
     #[test]
     fn test_keypair_generation_1() {
         let keypair = Keypair::generate();
-        let expected_public_key = PublicKey(RISTRETTO_BASEPOINT_POINT * keypair.private);
+        let expected_public_key = PublicKey(G * keypair.private);
         // Verify that the public key can be reconstructed from the private key
         assert_eq!(keypair.public, expected_public_key);
     }
@@ -261,29 +257,28 @@ mod tests {
     }
 
     #[test]
-    fn test_keypairJ_generation_1() {
-        let keypair = KeypairJ::generate();
-        let J = RistrettoPoint::hash_from_bytes::<Keccak512>(
-            RISTRETTO_BASEPOINT_POINT.compress().as_bytes(),
-        );
-        let expected_public_key = PublicKeyJ(J * keypair.private);
+    fn test_KeypairH_generation_1() {
+        let H = RistrettoPoint::hash_from_bytes::<Sha3_512>(G.compress().as_bytes());
+        let keypair = KeypairH::generate();
+
+        let expected_public_key = PublicKeyH(H * keypair.private);
         assert_eq!(keypair.public, expected_public_key);
     }
 
     #[test]
-    fn test_keypairJ_generation_2() {
-        let keypair = KeypairJ::generate();
+    fn test_KeypairH_generation_2() {
+        let keypair = KeypairH::generate();
         assert_eq!(
             keypair.public,
-            PublicKeyJ::from_private_key(keypair.private)
+            PublicKeyH::from_private_key(keypair.private)
         );
     }
 
     #[test]
-    fn test_keypairJ_from_private_key() {
+    fn test_KeypairH_from_private_key() {
         let private_key = Scalar::random(&mut OsRng);
-        let keypair = KeypairJ::from_private_key(private_key);
-        assert_eq!(keypair.public, PublicKeyJ::from_private_key(private_key));
+        let keypair = KeypairH::from_private_key(private_key);
+        assert_eq!(keypair.public, PublicKeyH::from_private_key(private_key));
         assert_eq!(keypair.private, private_key);
     }
 
@@ -300,19 +295,19 @@ mod tests {
         let challenge = Signature::calculate_challenge(&public_nonces, &public_keys);
         let signature = Signature::new(&nonce, &secret.private, challenge);
 
-        assert!(Signature::verify(&signature, &secret.public, challenge));
+        assert!(signature.verify(&secret.public, challenge));
     }
 
     #[test]
     fn test_partial_generalised_signature_verification() {
         let secret_value = Keypair::generate();
-        let blinding_factor = KeypairJ::generate();
+        let blinding_factor = KeypairH::generate();
         let other_secret = Keypair::generate();
-        let other_factor = KeypairJ::generate();
+        let other_factor = KeypairH::generate();
         let nonce_1 = Keypair::generate();
-        let nonce_2 = KeypairJ::generate();
+        let nonce_2 = KeypairH::generate();
         let other_nonce_1 = Keypair::generate();
-        let other_nonce_2 = KeypairJ::generate();
+        let other_nonce_2 = KeypairH::generate();
 
         let R = commit_hj(
             nonce_1.private + other_nonce_1.private,
@@ -331,11 +326,8 @@ mod tests {
             challenge,
         );
 
-        assert!(GeneralisedSignature::verify_excess_proof(
-            &signature,
-            secret_value.public.0 + blinding_factor.public.0,
-            challenge
-        ));
+        assert!(signature
+            .verify_excess_proof(secret_value.public.0 + blinding_factor.public.0, challenge));
     }
 
     #[test]
@@ -354,19 +346,19 @@ mod tests {
 
         let aggregated_sig = Signature::aggregate(vec![&sig1, &sig2]);
 
-        assert!(Signature::verify(&aggregated_sig, &public_keys, challenge));
+        assert!(aggregated_sig.verify(&public_keys, challenge));
     }
 
     #[test]
-    fn test_aggregated_generasised_signature() {
+    fn test_aggregated_generalised_signature() {
         let secret_value = Keypair::generate();
-        let blinding_factor = KeypairJ::generate();
+        let blinding_factor = KeypairH::generate();
         let other_secret = Keypair::generate();
-        let other_factor = KeypairJ::generate();
+        let other_factor = KeypairH::generate();
         let nonce_1 = Keypair::generate();
-        let nonce_2 = KeypairJ::generate();
+        let nonce_2 = KeypairH::generate();
         let other_nonce_1 = Keypair::generate();
-        let other_nonce_2 = KeypairJ::generate();
+        let other_nonce_2 = KeypairH::generate();
 
         let R = commit_hj(
             nonce_1.private + other_nonce_1.private,
@@ -399,11 +391,7 @@ mod tests {
             + other_secret.public.0
             + other_factor.public.0;
 
-        assert!(GeneralisedSignature::verify_excess_proof(
-            &aggregated_sig,
-            public_keys,
-            challenge
-        ));
+        assert!(aggregated_sig.verify_excess_proof(public_keys, challenge));
     }
 
     #[test]
@@ -435,9 +423,9 @@ mod tests {
         let tampered_message = Scalar::from_bytes_mod_order(*hasher.finalize().as_bytes());
 
         // Verify the original and modified signatures
-        let valid = Signature::verify(&signature, &secret.public, challenge);
-        let invalid1 = Signature::verify(&invalid_signature, &secret.public, challenge);
-        let invalid2 = Signature::verify(&signature, &secret.public, tampered_message);
+        let valid = signature.verify(&secret.public, challenge);
+        let invalid1 = invalid_signature.verify(&secret.public, challenge);
+        let invalid2 = signature.verify(&secret.public, tampered_message);
 
         // Assert the results
         assert!(valid);
@@ -447,15 +435,11 @@ mod tests {
 
     #[test]
     fn test_input_proof_signature() {
-        // GeneralisedSignature::new_input_proof
         let secret_value = Scalar::random(&mut rand::thread_rng());
         let blinding_factor = Scalar::random(&mut rand::thread_rng());
 
         let proof = GeneralisedSignature::new_input_proof(secret_value, blinding_factor);
 
-        assert!(GeneralisedSignature::verify_input_proof(
-            &proof,
-            commit(secret_value, blinding_factor)
-        ));
+        assert!(proof.verify_input_proof(&commit_hj(blinding_factor, secret_value)));
     }
 }
