@@ -94,36 +94,15 @@ impl Transaction {
         let challenge = Signature::calculate_challenge(&signature.R, &excess);
 
         // get outputs - inputs
-        let (inputs_sum, outputs_sum) = self.sum_commitments();
-        let expected_excess = PublicKey(outputs_sum - inputs_sum);
+        let expected_excess = PublicKey(
+            self.outputs.iter().sum::<RistrettoPoint>()
+                - self.inputs.iter().sum::<RistrettoPoint>(),
+        );
 
         let verify_kernel_excess = Signature::verify(signature, &excess, challenge);
         let verify_expected_excess = Signature::verify(signature, &expected_excess, challenge);
 
         (expected_excess == excess) && verify_kernel_excess && verify_expected_excess
-    }
-
-    fn sum_commitments(&self) -> (RistrettoPoint, RistrettoPoint) {
-        // sum inputs
-        let input_sum = self
-            .inputs
-            .iter()
-            .fold(None, |acc, p| match acc {
-                None => Some(*p),
-                Some(q) => Some(q + p),
-            })
-            .unwrap();
-
-        // sum outputs
-        let output_sum = self
-            .outputs
-            .iter()
-            .fold(None, |acc, p| match acc {
-                None => Some(*p),
-                Some(q) => Some(q + p),
-            })
-            .unwrap();
-        (input_sum, output_sum)
     }
 }
 
