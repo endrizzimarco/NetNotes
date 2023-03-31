@@ -28,6 +28,7 @@ pub struct Signature {
     pub R: PublicKey,
 }
 
+#[derive(Clone)]
 pub struct GeneralisedSignature {
     s1: Scalar,
     s2: Scalar,
@@ -378,8 +379,8 @@ mod tests {
             challenge,
         );
         let sig2 = GeneralisedSignature::new_excess_proof(
-            &nonce_1,
-            &nonce_2,
+            &other_nonce_1,
+            &other_nonce_2,
             &other_secret.private,
             &other_factor.private,
             challenge,

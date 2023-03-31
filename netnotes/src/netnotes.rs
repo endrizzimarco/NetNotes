@@ -114,7 +114,7 @@ impl Transaction {
             change_output,
             nonces_commitment,
             excess_commitment,
-            output_blindings: (blinding_diff, s_output),
+            output_blindings: (s_output, blinding_diff),
             schnorr_nonces: (nonce_G, nonce_H),
         }
     }
@@ -129,8 +129,7 @@ impl Transaction {
 
         // check signature against provided and calculated excess
         let challenge = GeneralisedSignature::calculate_challenge(&excess, &signature.R.0);
-        let verify_kernel_excess =
-            GeneralisedSignature::verify_excess_proof(signature, excess, challenge);
+        let verify_kernel_excess = signature.verify_excess_proof(excess, challenge);
         let verify_expected_kernel = expected_excess == excess;
 
         // verify schnorr, ooom (validity/ownership of inputs) and kernel proofs (no money created or destroyed)
@@ -251,7 +250,7 @@ impl SendData {
 
 impl ResponseData {
     /// The sender adds their half of the signature, aggregates the 2 partial signatures, and builds the final transaction.
-    pub fn finalise(tx: TxData, resp: &ResponseData) -> Transaction {
+    pub fn finalise(tx: &TxData, resp: &ResponseData) -> Transaction {
         let blinding_commitment = resp.public_blinding.0 + resp.public_blinding.1;
         let nonces_commitment = resp.public_nonces.0 + resp.public_nonces.1;
         // get the final nonce and excess for the transaction
@@ -259,6 +258,7 @@ impl ResponseData {
         let excess = tx.excess_commitment + blinding_commitment.0;
 
         let challenge = GeneralisedSignature::calculate_challenge(&excess, &final_nonce);
+
         let verify = resp
             .partial_sig
             .verify_excess_proof(blinding_commitment.0, challenge);
@@ -277,9 +277,9 @@ impl ResponseData {
         let signature = GeneralisedSignature::aggregate(vec![&partial_sig, &resp.partial_sig]);
 
         Transaction {
-            inputs: tx.inputs,
-            schnorr_proofs: tx.schnorr_proofs,
-            ooom_proofs: tx.ooom_proofs,
+            inputs: tx.inputs.clone(),
+            schnorr_proofs: tx.schnorr_proofs.clone(),
+            ooom_proofs: tx.ooom_proofs.clone(),
             outputs: vec![tx.change_output, resp.output_commitment],
             kernel: Kernel { excess, signature },
         }
@@ -353,174 +353,290 @@ mod tests {
         assert!(transaction.verify_ooom_proofs(stxo_set));
     }
 
-    // #[test]
-    // fn test_send_transaction() {
-    //     // Arrange
-    //     let amount = Scalar::from(100u64);
-    //     let change = Scalar::from(20u64);
-    //     let input_blinding_factors = vec![Scalar::from(10u64), Scalar::from(15u64)];
-    //     let inputs = vec![
-    //         pedersen::commit(Scalar::from(100u64), Scalar::from(10u64)),
-    //         pedersen::commit(Scalar::from(100u64), Scalar::from(15u64)),
-    //     ];
-    //     let tx_data = Transaction::init(amount, change, input_blinding_factors, inputs);
+    #[test]
+    fn test_invalid_ooom_proofs() {
+        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+            common_transaction_setup();
 
-    //     // Act
-    //     let send_data = tx_data.send();
+        let tx_data = Transaction::init(
+            amount,
+            change,
+            inputs_values,
+            inputs_blinding_r,
+            inputs_blinding_s,
+            pos,
+            stxo_set.clone(),
+        );
 
-    //     // Assert
-    //     assert_eq!(send_data.amount, amount);
-    //     assert_eq!(
-    //         send_data.public_blinding_diff,
-    //         tx_data.blinding_keypair.public
-    //     );
-    //     assert_eq!(send_data.public_nonce, tx_data.nonce_keypair.public);
-    // }
+        let mut transaction = mock_tx(tx_data);
+        // Add a second blinding factor to the first input
+        transaction.inputs[0] = pedersen::commit_hj(Scalar::from(120u64), Scalar::from(11u64));
+        assert!(!transaction.verify_ooom_proofs(stxo_set));
+    }
 
-    // #[test]
-    // fn test_finalise_transaction() {
-    //     // mock tx data
-    //     let r_output = Scalar::random(&mut OsRng);
-    //     let r_input = Scalar::random(&mut OsRng);
-    //     let tx_data = TxData {
-    //         inputs: vec![pedersen::commit(Scalar::from(150u64), r_input)],
-    //         amount: Scalar::from(100u64),
-    //         change_output: pedersen::commit(Scalar::from(50u64), r_output),
-    //         nonce_keypair: Keypair::generate(),
-    //         blinding_keypair: Keypair::from_private_key(Scalar::from(r_output - r_input)),
-    //     };
+    #[test]
+    fn test_send_transaction() {
+        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+            common_transaction_setup();
 
-    //     let other_nonce = Keypair::generate();
-    //     let other_blinding = Keypair::from_private_key(Scalar::from(6u64));
-    //     let output_commitment = pedersen::commit(Scalar::from(100u64), other_blinding.private);
+        let tx_data = Transaction::init(
+            amount,
+            change,
+            inputs_values,
+            inputs_blinding_r,
+            inputs_blinding_s,
+            pos,
+            stxo_set.clone(),
+        );
 
-    //     let challenge = Signature::calculate_challenge(
-    //         &(tx_data.nonce_keypair.public + other_nonce.public),
-    //         &(tx_data.blinding_keypair.public + other_blinding.public),
-    //     );
+        let send_data = tx_data.send();
 
-    //     // mock response data
-    //     let response_data = ResponseData {
-    //         partial_sig: Signature::new(&other_nonce, &other_blinding.private, challenge),
-    //         output_commitment,
-    //         public_nonce: other_nonce.public,
-    //         public_blinding: other_blinding.public,
-    //     };
+        // Assert
+        assert_eq!(send_data.amount, amount);
+        assert_eq!(send_data.excess_commitment, tx_data.excess_commitment);
+        assert_eq!(send_data.nonces_commitment, tx_data.nonces_commitment);
+    }
 
-    //     // Act
-    //     let transaction = ResponseData::finalise(&tx_data, &response_data);
+    #[test]
+    fn test_finalise_transaction() {
+        // mock tx data
+        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+            common_transaction_setup();
+        let tx_data = Transaction::init(
+            amount,
+            change,
+            inputs_values,
+            inputs_blinding_r,
+            inputs_blinding_s,
+            pos,
+            stxo_set.clone(),
+        );
+        let send_data = tx_data.send();
 
-    //     // Assert
-    //     assert_eq!(transaction.inputs, tx_data.inputs);
-    //     assert_eq!(transaction.outputs.len(), 2);
-    //     assert_eq!(transaction.outputs[0], tx_data.change_output);
-    //     assert_eq!(transaction.outputs[1], response_data.output_commitment);
-    //     assert_eq!(
-    //         transaction.kernel.excess,
-    //         tx_data.blinding_keypair.public + other_blinding.public
-    //     );
-    //     assert!(transaction.verify());
-    // }
+        // mock response data
+        let other_blinding = Keypair::generate();
+        let other_blinding_h = KeypairH::generate();
+        let other_nonce = Keypair::generate();
+        let other_nonce_h = KeypairH::generate();
+        let excess_commitment = (other_blinding.public + other_blinding_h.public).0;
+        let nonces_commitment = (other_nonce.public + other_nonce_h.public).0;
 
-    // #[test]
-    // #[should_panic(expected = "Signature verification failed")]
-    // fn test_incorrect_response() {
-    //     // mock tx data
-    //     let tx_data = TxData {
-    //         inputs: vec![pedersen::commit(Scalar::from(150u64), Scalar::from(10u64))],
-    //         amount: Scalar::from(100u64),
-    //         change_output: pedersen::commit(Scalar::from(50u64), Scalar::from(5u64)),
-    //         nonce_keypair: Keypair::generate(),
-    //         blinding_keypair: Keypair::from_private_key(Scalar::from(5u64)),
-    //     };
+        let challenge = GeneralisedSignature::calculate_challenge(
+            &(send_data.excess_commitment + excess_commitment),
+            &(send_data.nonces_commitment + nonces_commitment),
+        );
 
-    //     let other_nonce = Keypair::generate();
-    //     let other_blinding = Keypair::from_private_key(Scalar::from(6u64));
-    //     let output_commitment = pedersen::commit(Scalar::from(100u64), other_blinding.private);
+        let partial_sig = GeneralisedSignature::new_excess_proof(
+            &other_nonce,
+            &other_nonce_h,
+            &other_blinding.private,
+            &other_blinding_h.private,
+            challenge,
+        );
+        let output_commitment = pedersen::generalised_commit(
+            send_data.amount,
+            other_blinding_h.private,
+            other_blinding.private,
+        );
 
-    //     let challenge = Signature::calculate_challenge(
-    //         &(tx_data.nonce_keypair.public + other_nonce.public),
-    //         &(tx_data.blinding_keypair.public + other_blinding.public),
-    //     );
+        let mock_response = ResponseData {
+            partial_sig,
+            output_commitment,
+            public_nonces: (other_nonce.public, other_nonce_h.public),
+            public_blinding: (other_blinding.public, other_blinding_h.public),
+        };
 
-    //     // mock response data
-    //     let response_data = ResponseData {
-    //         partial_sig: Signature::new(&other_nonce, &other_nonce.private, challenge),
-    //         output_commitment,
-    //         public_nonce: other_nonce.public,
-    //         public_blinding: other_blinding.public,
-    //     };
+        // Act
+        let transaction = ResponseData::finalise(&tx_data, &mock_response);
 
-    //     // Act
-    //     ResponseData::finalise(&tx_data, &response_data);
-    // }
+        // Assert
+        assert_eq!(transaction.inputs, tx_data.inputs);
+        assert_eq!(transaction.outputs.len(), 2);
+        assert_eq!(transaction.outputs[0], tx_data.change_output);
+        assert_eq!(transaction.outputs[1], mock_response.output_commitment);
+        assert_eq!(
+            transaction.kernel.excess,
+            tx_data.excess_commitment + excess_commitment
+        );
+        assert!(transaction.verify(stxo_set));
+    }
 
-    // #[test]
-    // fn test_correct_transaction() {
-    //     let ten = Scalar::from(10u64);
-    //     let keypair = &Keypair::from_private_key(ten);
-    //     let challenge =
-    //         Signature::calculate_challenge(&keypair.public, &PublicKey::from_private_key(ten));
-    //     let signature = Signature::new(keypair, &ten, challenge);
+    #[test]
+    #[should_panic(expected = "Signature verification failed")]
+    fn test_incorrect_response() {
+        // mock tx data
+        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+            common_transaction_setup();
+        let tx_data = Transaction::init(
+            amount,
+            change,
+            inputs_values,
+            inputs_blinding_r,
+            inputs_blinding_s,
+            pos,
+            stxo_set.clone(),
+        );
 
-    //     let transaction = Transaction {
-    //         inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
-    //         outputs: vec![
-    //             pedersen::commit(Scalar::from(50u64), ten),
-    //             pedersen::commit(Scalar::from(100u64), ten),
-    //         ],
-    //         kernel: Kernel {
-    //             excess: PublicKey::from_private_key(ten),
-    //             signature,
-    //         },
-    //     };
+        // mock response data
+        let other_blinding = Keypair::generate();
+        let other_blinding_h = KeypairH::generate();
+        let other_nonce = Keypair::generate();
+        let other_nonce_h = KeypairH::generate();
+        let excess_commitment = (other_blinding.public + other_blinding_h.public).0;
+        let nonces_commitment = (other_nonce.public + other_nonce_h.public).0;
 
-    //     assert!(transaction.verify());
-    // }
+        let challenge = GeneralisedSignature::calculate_challenge(
+            &(tx_data.excess_commitment + excess_commitment),
+            &(tx_data.nonces_commitment + nonces_commitment),
+        );
 
-    // #[test]
-    // // wrong amount
-    // fn test_incorrect_transaction_1() {
-    //     let ten = Scalar::from(10u64);
-    //     let keypair = &Keypair::from_private_key(ten);
-    //     let challenge =
-    //         Signature::calculate_challenge(&keypair.public, &PublicKey::from_private_key(ten));
-    //     let signature = Signature::new(keypair, &ten, challenge);
+        let partial_sig = GeneralisedSignature::new_excess_proof(
+            &other_nonce,
+            &other_nonce_h,
+            &other_nonce.private,
+            &other_blinding_h.private,
+            challenge,
+        );
+        let output_commitment = pedersen::generalised_commit(
+            tx_data.amount,
+            other_blinding_h.private,
+            other_blinding.private,
+        );
 
-    //     let transaction = Transaction {
-    //         inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
-    //         outputs: vec![pedersen::commit(Scalar::from(1000u64), ten)],
-    //         kernel: Kernel {
-    //             excess: PublicKey::from_private_key(ten),
-    //             signature,
-    //         },
-    //     };
+        let mock_response = ResponseData {
+            partial_sig,
+            output_commitment,
+            public_nonces: (other_nonce.public, other_nonce_h.public),
+            public_blinding: (other_blinding.public, other_blinding_h.public),
+        };
 
-    //     assert!(!transaction.verify());
-    // }
+        // Act
+        ResponseData::finalise(&tx_data, &mock_response);
+    }
 
-    // #[test]
-    // // wrong signature
-    // fn test_incorrect_transaction_2() {
-    //     let ten = Scalar::from(10u64);
-    //     let keypair = &Keypair::from_private_key(ten);
-    //     let challenge = Signature::calculate_challenge(
-    //         &keypair.public,
-    //         &PublicKey::from_private_key(Scalar::one()),
-    //     );
-    //     let signature = Signature::new(keypair, &ten, challenge);
+    #[test]
+    fn test_correct_transaction() {
+        let ten = Scalar::from(10u64);
+        let keypair = &Keypair::from_private_key(ten);
+        let keypair_H = &KeypairH::from_private_key(ten);
+        let challenge = GeneralisedSignature::calculate_challenge(
+            &(keypair.public.0 + keypair_H.public.0),
+            &(PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0),
+        );
+        let signature =
+            GeneralisedSignature::new_excess_proof(keypair, keypair_H, &ten, &ten, challenge);
+        let input = pedersen::commit_hj(ten, Scalar::from(150u64));
+        let stxo_set = mock_stxo_set(&vec![0], &vec![input + pedersen::commit_G(ten)]);
 
-    //     let transaction = Transaction {
-    //         inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
-    //         outputs: vec![pedersen::commit(Scalar::from(1000u64), ten)],
-    //         kernel: Kernel {
-    //             excess: PublicKey::from_private_key(ten),
-    //             signature,
-    //         },
-    //     };
+        let transaction = Transaction {
+            inputs: vec![input],
+            schnorr_proofs: Transaction::generate_schnorr_proofs(
+                vec![Scalar::from(150u64)],
+                vec![ten],
+            ),
+            ooom_proofs: Transaction::generate_ooom_proofs(
+                stxo_set.clone(),
+                vec![0],
+                &vec![input],
+                vec![ten],
+            ),
+            outputs: vec![
+                pedersen::generalised_commit(Scalar::from(50u64), ten, ten),
+                pedersen::generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
+            ],
+            kernel: Kernel {
+                excess: PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0,
+                signature,
+            },
+        };
 
-    //     assert!(!transaction.verify());
-    // }
+        assert!(transaction.verify(stxo_set));
+    }
+
+    #[test]
+    // wrong amount
+    fn test_incorrect_transaction_1() {
+        let ten = Scalar::from(10u64);
+        let keypair = &Keypair::from_private_key(ten);
+        let keypair_H = &KeypairH::from_private_key(ten);
+        let challenge = GeneralisedSignature::calculate_challenge(
+            &(keypair.public.0 + keypair_H.public.0),
+            &(PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0),
+        );
+        let signature =
+            GeneralisedSignature::new_excess_proof(keypair, keypair_H, &ten, &ten, challenge);
+        let input = pedersen::commit_hj(ten, Scalar::from(149u64));
+        let stxo_set = mock_stxo_set(&vec![0], &vec![input + pedersen::commit_G(ten)]);
+
+        let transaction = Transaction {
+            inputs: vec![input],
+            schnorr_proofs: Transaction::generate_schnorr_proofs(
+                vec![Scalar::from(150u64)],
+                vec![ten],
+            ),
+            ooom_proofs: Transaction::generate_ooom_proofs(
+                stxo_set.clone(),
+                vec![0],
+                &vec![input],
+                vec![ten],
+            ),
+            outputs: vec![
+                pedersen::generalised_commit(Scalar::from(50u64), ten, ten),
+                pedersen::generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
+            ],
+            kernel: Kernel {
+                excess: PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0,
+                signature,
+            },
+        };
+
+        assert!(!transaction.verify(stxo_set));
+    }
+
+    #[test]
+    // wrong signature
+    fn test_incorrect_transaction_2() {
+        let ten = Scalar::from(10u64);
+        let keypair = &Keypair::from_private_key(ten);
+        let keypair_H = &KeypairH::from_private_key(ten);
+        let challenge = GeneralisedSignature::calculate_challenge(
+            &(keypair.public.0 + keypair_H.public.0),
+            &(PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0),
+        );
+        let signature = GeneralisedSignature::new_excess_proof(
+            keypair,
+            keypair_H,
+            &Scalar::zero(),
+            &ten,
+            challenge,
+        );
+        let input = pedersen::commit_hj(ten, Scalar::from(149u64));
+        let stxo_set = mock_stxo_set(&vec![0], &vec![input + pedersen::commit_G(ten)]);
+
+        let transaction = Transaction {
+            inputs: vec![input],
+            schnorr_proofs: Transaction::generate_schnorr_proofs(
+                vec![Scalar::from(150u64)],
+                vec![ten],
+            ),
+            ooom_proofs: Transaction::generate_ooom_proofs(
+                stxo_set.clone(),
+                vec![0],
+                &vec![input],
+                vec![ten],
+            ),
+            outputs: vec![
+                pedersen::generalised_commit(Scalar::from(50u64), ten, ten),
+                pedersen::generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
+            ],
+            kernel: Kernel {
+                excess: PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0,
+                signature,
+            },
+        };
+
+        assert!(!transaction.verify(stxo_set));
+    }
 
     #[test]
     // Test the sum() function for point addition
@@ -537,10 +653,16 @@ mod tests {
         assert_eq!(points.sum().unwrap(), sum);
     }
 
-    fn mock_stxo_set(l: &Vec<usize>, C_stxo: &Vec<Commitment>) -> Vec<Commitment> {
+    #[allow(dead_code)]
+    fn mock_stxo_set(
+        l: &Vec<usize>,
+        C_stxo: &Vec<GeneralisedCommitment>,
+    ) -> Vec<GeneralisedCommitment> {
         let set = (1..GENS.max_set_size() - C_stxo.len() + 1)
-            .map(|_| RistrettoPoint::random(&mut OsRng))
-            .collect::<Vec<RistrettoPoint>>();
+            .map(|_| {
+                RistrettoPoint::random(&mut OsRng) + pedersen::commit_J(Scalar::random(&mut OsRng))
+            })
+            .collect::<Vec<GeneralisedCommitment>>();
 
         l.iter().zip(C_stxo.iter()).fold(set, |mut acc, (l, C_in)| {
             acc.insert(*l, *C_in);
@@ -548,6 +670,7 @@ mod tests {
         })
     }
 
+    #[allow(dead_code)]
     fn common_transaction_setup() -> (
         Scalar,
         Scalar,
@@ -580,6 +703,7 @@ mod tests {
         )
     }
 
+    #[allow(dead_code)]
     fn mock_tx(tx_data: TxData) -> Transaction {
         Transaction {
             inputs: tx_data.inputs,
