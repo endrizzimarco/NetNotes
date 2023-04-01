@@ -1,9 +1,9 @@
 use curve25519_dalek::scalar::Scalar;
 use netnotes::mimblewimble::{ResponseData, SendData, Transaction};
-use netnotes::pedersen;
+use netnotes::pedersen::{Commitment, GENS};
 use rand::rngs::OsRng;
 
-fn setup() -> (Vec<Scalar>, Vec<Scalar>, Vec<pedersen::Commitment>) {
+fn setup() -> (Vec<Scalar>, Vec<Scalar>, Vec<Commitment>) {
     let blinding_factors = (0..10)
         .map(|_| Scalar::random(&mut OsRng))
         .collect::<Vec<Scalar>>();
@@ -18,8 +18,8 @@ fn setup() -> (Vec<Scalar>, Vec<Scalar>, Vec<pedersen::Commitment>) {
     let inputs = values
         .iter()
         .zip(blinding_factors.iter())
-        .map(|(value, blinding_factor)| pedersen::commit(*value, *blinding_factor))
-        .collect::<Vec<pedersen::Commitment>>();
+        .map(|(value, blinding_factor)| GENS.commit(*value, *blinding_factor))
+        .collect::<Vec<Commitment>>();
 
     (blinding_factors, values, inputs)
 }
@@ -92,7 +92,7 @@ fn test_transaction_modified_input() {
     let len = inputs.len();
 
     // change last input element
-    inputs[len - 1] = pedersen::commit(Scalar::one(), Scalar::one());
+    inputs[len - 1] = GENS.commit(Scalar::one(), Scalar::one());
 
     // pick change as 1
     let change = Scalar::one();
