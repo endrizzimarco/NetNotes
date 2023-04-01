@@ -1,0 +1,11 @@
+group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
+nn_gen:2,,,,,14657027041.0,ns,1
+nn_gen:2,,,,,14860375792.0,ns,1
+nn_gen:2,,,,,14703261208.0,ns,1
+nn_gen:2,,,,,14703278125.0,ns,1
+nn_gen:2,,,,,14625916709.0,ns,1
+nn_gen:2,,,,,14642982583.0,ns,1
+nn_gen:2,,,,,14665747334.0,ns,1
+nn_gen:2,,,,,14639148708.0,ns,1
+nn_gen:2,,,,,14909495167.0,ns,1
+nn_gen:2,,,,,14625288416.0,ns,1
