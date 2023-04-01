@@ -6,42 +6,51 @@ use lazy_static::lazy_static;
 use one_of_many_proofs::proofs::ProofGens;
 use sha3::Keccak512;
 
-lazy_static! {
-    // supports sets of up to 32 commitments in the one-out-of-many proof
-    pub static ref GENS: ProofGens = ProofGens::new(5).unwrap();
-    static ref J: RistrettoBasepointTable = RistrettoBasepointTable::create(
-        &RistrettoPoint::hash_from_bytes::<Keccak512>(G.compress().as_bytes())
-    );
-}
-
 pub type Commitment = RistrettoPoint;
 pub type GeneralisedCommitment = RistrettoPoint;
 
-// s.G + r.H + v.J
-pub fn generalised_commit(value: Scalar, r: Scalar, s: Scalar) -> GeneralisedCommitment {
-    GENS.commit(&r, &s).unwrap() + commit_J(value)
+lazy_static! {
+    static ref J: RistrettoBasepointTable = RistrettoBasepointTable::create(
+        &RistrettoPoint::hash_from_bytes::<Keccak512>(G.compress().as_bytes())
+    );
+    pub static ref GENS: Pedersen = Pedersen::new(5);
+    pub static ref GENS_MEDIUM: Pedersen = Pedersen::new(8);
+    pub static ref GENS_LARGE: Pedersen = Pedersen::new(10);
 }
 
-// v.H + r.G
-pub fn commit(value: Scalar, r: Scalar) -> Commitment {
-    GENS.commit(&value, &r).unwrap()
-}
+pub struct Pedersen(pub ProofGens);
 
-// v.J + r.H
-pub fn commit_hj(value: Scalar, r: Scalar) -> Commitment {
-    commit_H(value) + commit_J(r)
-}
+impl Pedersen {
+    pub fn new(n_bits: usize) -> Self {
+        Pedersen(ProofGens::new(n_bits).unwrap())
+    }
 
-pub fn commit_G(value: Scalar) -> Commitment {
-    GENS.commit(&Scalar::zero(), &value).unwrap()
-}
+    // s.G + r.H + v.J
+    pub fn generalised_commit(&self, value: Scalar, r: Scalar, s: Scalar) -> GeneralisedCommitment {
+        self.commit(r, s) + self.commit_J(value)
+    }
 
-pub fn commit_H(value: Scalar) -> Commitment {
-    GENS.commit(&value, &Scalar::zero()).unwrap()
-}
+    // v.H + r.G
+    pub fn commit(&self, value: Scalar, r: Scalar) -> Commitment {
+        self.0.commit(&value, &r).unwrap()
+    }
 
-pub fn commit_J(value: Scalar) -> RistrettoPoint {
-    &*J * &value
+    // r.H + v.J
+    pub fn commit_hj(&self, value: Scalar, r: Scalar) -> Commitment {
+        self.commit_H(value) + self.commit_J(r)
+    }
+
+    pub fn commit_G(&self, value: Scalar) -> Commitment {
+        self.commit(Scalar::zero(), value)
+    }
+
+    pub fn commit_H(&self, value: Scalar) -> Commitment {
+        self.commit(value, Scalar::zero())
+    }
+
+    pub fn commit_J(&self, value: Scalar) -> RistrettoPoint {
+        &*J * &value
+    }
 }
 
 #[cfg(test)]
@@ -60,7 +69,7 @@ mod tests {
         let expected = value * H + r * G;
 
         // compute the actual commitment using the commit function
-        let commitment = commit(value, r);
+        let commitment = GENS.commit(value, r);
 
         assert_eq!(commitment, expected);
     }
@@ -71,7 +80,7 @@ mod tests {
         let expected = value * G;
 
         // compute the actual commitment using the commit function
-        let commitment = commit_G(value);
+        let commitment = GENS.commit_G(value);
 
         assert_eq!(commitment, expected);
     }
@@ -85,7 +94,7 @@ mod tests {
         let expected = value * H;
 
         // compute the actual commitment using the commit function
-        let commitment = commit_H(value);
+        let commitment = GENS.commit_H(value);
 
         assert_eq!(commitment, expected);
     }
@@ -95,9 +104,9 @@ mod tests {
         let scalar1 = Scalar::random(&mut OsRng);
         let scalar2 = Scalar::random(&mut OsRng);
 
-        let G_commitment = commit_G(scalar2);
-        let H_commitment = commit_H(scalar1);
-        let commitment = commit(scalar1, scalar2);
+        let G_commitment = GENS.commit_G(scalar2);
+        let H_commitment = GENS.commit_H(scalar1);
+        let commitment = GENS.commit(scalar1, scalar2);
 
         // check if the actual commitment matches the reconstructed commitment
         assert_eq!(commitment, G_commitment + H_commitment);
@@ -109,10 +118,10 @@ mod tests {
         let scalar2 = Scalar::random(&mut OsRng);
         let scalar3 = Scalar::random(&mut OsRng);
 
-        let G_commitment = commit_G(scalar3);
-        let H_commitment = commit_H(scalar2);
-        let J_commitment = commit_J(scalar1);
-        let expected = generalised_commit(scalar1, scalar2, scalar3);
+        let G_commitment = GENS.commit_G(scalar3);
+        let H_commitment = GENS.commit_H(scalar2);
+        let J_commitment = GENS.commit_J(scalar1);
+        let expected = GENS.generalised_commit(scalar1, scalar2, scalar3);
 
         // check if the generalised commitment matches the sum of individual commitments
         assert_eq!(expected, G_commitment + H_commitment + J_commitment);
@@ -124,9 +133,9 @@ mod tests {
         let scalar2 = Scalar::random(&mut OsRng);
         let scalar3 = Scalar::random(&mut OsRng);
 
-        let generalised_commitment = generalised_commit(scalar1, scalar2, scalar3);
-        let HJ_commitment = commit_hj(scalar2, scalar1);
-        let expected = commit(Scalar::zero(), scalar3);
+        let generalised_commitment = GENS.generalised_commit(scalar1, scalar2, scalar3);
+        let HJ_commitment = GENS.commit_hj(scalar2, scalar1);
+        let expected = GENS.commit(Scalar::zero(), scalar3);
 
         // s.G + r.H + v.J - (v.J + r.H) = s.G
         assert_eq!(expected, generalised_commitment - HJ_commitment);
@@ -138,11 +147,11 @@ mod tests {
 
         let value = Scalar::random(&mut OsRng);
         let r = Scalar::random(&mut OsRng);
-        let commitment = commit(value, r);
+        let commitment = GENS.commit(value, r);
 
         let value2 = Scalar::random(&mut OsRng);
         let r2 = Scalar::random(&mut OsRng);
-        let commitment2 = commit(value2, r2);
+        let commitment2 = GENS.commit(value2, r2);
 
         // check homorphic properties
         let expected = (value + value2) * H + (r + r2) * G;

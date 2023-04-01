@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use super::pedersen::{commit_G, commit_H, commit_J, commit_hj, Commitment};
+use super::pedersen::{Commitment, GENS};
 use blake3::Hasher;
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -79,13 +79,13 @@ impl KeypairH {
 
 impl PublicKey {
     pub fn from_private_key(private_key: PrivateKey) -> Self {
-        PublicKey(commit_G(private_key))
+        PublicKey(GENS.commit_G(private_key))
     }
 }
 
 impl PublicKeyH {
     pub fn from_private_key(private_key: PrivateKey) -> Self {
-        PublicKeyH(commit_H(private_key))
+        PublicKeyH(GENS.commit_H(private_key))
     }
 }
 
@@ -201,8 +201,8 @@ impl GeneralisedSignature {
     pub fn new_input_proof(value: PrivateKey, blinding_factor: PrivateKey) -> GeneralisedSignature {
         let nonce_H = Scalar::random(&mut OsRng);
         let nonce_J = Scalar::random(&mut OsRng);
-        let commitment = commit_hj(blinding_factor, value);
-        let nonces_commitment = commit_hj(nonce_H, nonce_J);
+        let commitment = GENS.commit_hj(blinding_factor, value);
+        let nonces_commitment = GENS.commit_hj(nonce_H, nonce_J);
 
         let challenge = Self::calculate_challenge(&commitment, &nonces_commitment);
         let s1 = nonce_H + challenge * blinding_factor;
@@ -215,7 +215,7 @@ impl GeneralisedSignature {
     // s1.H + s2.J == R + e.C
     pub fn verify_input_proof(&self, commitment: &Commitment) -> bool {
         let e = Self::calculate_challenge(&commitment, &self.R.0);
-        commit_H(self.s1) + commit_J(self.s2) == self.R.0 + e * commitment
+        GENS.commit_H(self.s1) + GENS.commit_J(self.s2) == self.R.0 + e * commitment
     }
 
     pub fn calculate_challenge(commitment: &Commitment, nonces_commitment: &Commitment) -> Scalar {
@@ -231,7 +231,6 @@ impl GeneralisedSignature {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pedersen::commit_hj;
     use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT as G;
     use sha3::Sha3_512;
 
@@ -310,11 +309,11 @@ mod tests {
         let other_nonce_1 = Keypair::generate();
         let other_nonce_2 = KeypairH::generate();
 
-        let R = commit_hj(
+        let R = GENS.commit_hj(
             nonce_1.private + other_nonce_1.private,
             nonce_2.private + other_nonce_2.private,
         );
-        let C = commit_hj(
+        let C = GENS.commit_hj(
             blinding_factor.private + other_factor.private,
             secret_value.private + other_secret.private,
         );
@@ -361,11 +360,11 @@ mod tests {
         let other_nonce_1 = Keypair::generate();
         let other_nonce_2 = KeypairH::generate();
 
-        let R = commit_hj(
+        let R = GENS.commit_hj(
             nonce_1.private + other_nonce_1.private,
             nonce_2.private + other_nonce_2.private,
         );
-        let C = commit_hj(
+        let C = GENS.commit_hj(
             blinding_factor.private + other_factor.private,
             secret_value.private + other_secret.private,
         );
@@ -441,6 +440,6 @@ mod tests {
 
         let proof = GeneralisedSignature::new_input_proof(secret_value, blinding_factor);
 
-        assert!(proof.verify_input_proof(&commit_hj(blinding_factor, secret_value)));
+        assert!(proof.verify_input_proof(&GENS.commit_hj(blinding_factor, secret_value)));
     }
 }

@@ -1,5 +1,4 @@
-use super::pedersen;
-use super::pedersen::Commitment;
+use super::pedersen::{Commitment, GENS};
 use super::schnorr::{Keypair, PublicKey, Signature};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -65,7 +64,7 @@ impl Transaction {
     ) -> TxData {
         // Generate change_output
         let r_output = Scalar::random(&mut OsRng);
-        let change_output: Commitment = pedersen::commit(change, r_output);
+        let change_output: Commitment = GENS.commit(change, r_output);
 
         // Calculate the difference between outputs' blinding factors and inputs' blinding factors
         let r_input = input_blinding_factors.iter().sum::<Scalar>();
@@ -131,7 +130,7 @@ impl SendData {
 
         ResponseData {
             partial_sig,
-            output_commitment: pedersen::commit(data.amount, blinding_keypair.private),
+            output_commitment: GENS.commit(data.amount, blinding_keypair.private),
             public_nonce: nonce_keypair.public,
             public_blinding: blinding_keypair.public,
         }
@@ -177,8 +176,8 @@ mod tests {
         let change = Scalar::from(20u64);
         let input_blinding_factors = vec![Scalar::from(10u64), Scalar::from(15u64)];
         let inputs = vec![
-            pedersen::commit(Scalar::from(100u64), Scalar::from(10u64)),
-            pedersen::commit(Scalar::from(100u64), Scalar::from(15u64)),
+            GENS.commit(Scalar::from(100u64), Scalar::from(10u64)),
+            GENS.commit(Scalar::from(100u64), Scalar::from(15u64)),
         ];
         let tx_data = Transaction::init(amount, change, input_blinding_factors, inputs);
 
@@ -200,16 +199,16 @@ mod tests {
         let r_output = Scalar::random(&mut OsRng);
         let r_input = Scalar::random(&mut OsRng);
         let tx_data = TxData {
-            inputs: vec![pedersen::commit(Scalar::from(150u64), r_input)],
+            inputs: vec![GENS.commit(Scalar::from(150u64), r_input)],
             amount: Scalar::from(100u64),
-            change_output: pedersen::commit(Scalar::from(50u64), r_output),
+            change_output: GENS.commit(Scalar::from(50u64), r_output),
             nonce_keypair: Keypair::generate(),
             blinding_keypair: Keypair::from_private_key(Scalar::from(r_output - r_input)),
         };
 
         let other_nonce = Keypair::generate();
         let other_blinding = Keypair::from_private_key(Scalar::from(6u64));
-        let output_commitment = pedersen::commit(Scalar::from(100u64), other_blinding.private);
+        let output_commitment = GENS.commit(Scalar::from(100u64), other_blinding.private);
 
         let challenge = Signature::calculate_challenge(
             &(tx_data.nonce_keypair.public + other_nonce.public),
@@ -244,16 +243,16 @@ mod tests {
     fn test_incorrect_response() {
         // mock tx data
         let tx_data = TxData {
-            inputs: vec![pedersen::commit(Scalar::from(150u64), Scalar::from(10u64))],
+            inputs: vec![GENS.commit(Scalar::from(150u64), Scalar::from(10u64))],
             amount: Scalar::from(100u64),
-            change_output: pedersen::commit(Scalar::from(50u64), Scalar::from(5u64)),
+            change_output: GENS.commit(Scalar::from(50u64), Scalar::from(5u64)),
             nonce_keypair: Keypair::generate(),
             blinding_keypair: Keypair::from_private_key(Scalar::from(5u64)),
         };
 
         let other_nonce = Keypair::generate();
         let other_blinding = Keypair::from_private_key(Scalar::from(6u64));
-        let output_commitment = pedersen::commit(Scalar::from(100u64), other_blinding.private);
+        let output_commitment = GENS.commit(Scalar::from(100u64), other_blinding.private);
 
         let challenge = Signature::calculate_challenge(
             &(tx_data.nonce_keypair.public + other_nonce.public),
@@ -281,10 +280,10 @@ mod tests {
         let signature = Signature::new(keypair, &ten, challenge);
 
         let transaction = Transaction {
-            inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
+            inputs: vec![GENS.commit(Scalar::from(150u64), ten)],
             outputs: vec![
-                pedersen::commit(Scalar::from(50u64), ten),
-                pedersen::commit(Scalar::from(100u64), ten),
+                GENS.commit(Scalar::from(50u64), ten),
+                GENS.commit(Scalar::from(100u64), ten),
             ],
             kernel: Kernel {
                 excess: PublicKey::from_private_key(ten),
@@ -305,8 +304,8 @@ mod tests {
         let signature = Signature::new(keypair, &ten, challenge);
 
         let transaction = Transaction {
-            inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
-            outputs: vec![pedersen::commit(Scalar::from(1000u64), ten)],
+            inputs: vec![GENS.commit(Scalar::from(150u64), ten)],
+            outputs: vec![GENS.commit(Scalar::from(1000u64), ten)],
             kernel: Kernel {
                 excess: PublicKey::from_private_key(ten),
                 signature,
@@ -328,8 +327,8 @@ mod tests {
         let signature = Signature::new(keypair, &ten, challenge);
 
         let transaction = Transaction {
-            inputs: vec![pedersen::commit(Scalar::from(150u64), ten)],
-            outputs: vec![pedersen::commit(Scalar::from(1000u64), ten)],
+            inputs: vec![GENS.commit(Scalar::from(150u64), ten)],
+            outputs: vec![GENS.commit(Scalar::from(1000u64), ten)],
             kernel: Kernel {
                 excess: PublicKey::from_private_key(ten),
                 signature,
