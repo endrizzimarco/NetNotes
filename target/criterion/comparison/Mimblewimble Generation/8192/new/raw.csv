@@ -1,11 +1,11 @@
 group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
-comparison,Mimblewimble Generation,8192,,,88415375.0,ns,229
-comparison,Mimblewimble Generation,8192,,,175355208.0,ns,458
-comparison,Mimblewimble Generation,8192,,,263175833.0,ns,687
-comparison,Mimblewimble Generation,8192,,,350795084.0,ns,916
-comparison,Mimblewimble Generation,8192,,,436524042.0,ns,1145
-comparison,Mimblewimble Generation,8192,,,525288833.0,ns,1374
-comparison,Mimblewimble Generation,8192,,,615978459.0,ns,1603
-comparison,Mimblewimble Generation,8192,,,701897167.0,ns,1832
-comparison,Mimblewimble Generation,8192,,,789185750.0,ns,2061
-comparison,Mimblewimble Generation,8192,,,875547458.0,ns,2290
+comparison,Mimblewimble Generation,8192,,,90294458.0,ns,232
+comparison,Mimblewimble Generation,8192,,,182699125.0,ns,464
+comparison,Mimblewimble Generation,8192,,,278015125.0,ns,696
+comparison,Mimblewimble Generation,8192,,,356016083.0,ns,928
+comparison,Mimblewimble Generation,8192,,,441602167.0,ns,1160
+comparison,Mimblewimble Generation,8192,,,530085708.0,ns,1392
+comparison,Mimblewimble Generation,8192,,,619107667.0,ns,1624
+comparison,Mimblewimble Generation,8192,,,707412042.0,ns,1856
+comparison,Mimblewimble Generation,8192,,,818261000.0,ns,2088
+comparison,Mimblewimble Generation,8192,,,909160166.0,ns,2320
