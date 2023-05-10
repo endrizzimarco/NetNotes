@@ -1,0 +1,11 @@
+group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
+comparison,Mimblewimble Verification,32768,,,90153750.0,ns,1102
+comparison,Mimblewimble Verification,32768,,,181399500.0,ns,2204
+comparison,Mimblewimble Verification,32768,,,274497292.0,ns,3306
+comparison,Mimblewimble Verification,32768,,,359844375.0,ns,4408
+comparison,Mimblewimble Verification,32768,,,450240500.0,ns,5510
+comparison,Mimblewimble Verification,32768,,,540778500.0,ns,6612
+comparison,Mimblewimble Verification,32768,,,635292750.0,ns,7714
+comparison,Mimblewimble Verification,32768,,,719530708.0,ns,8816
+comparison,Mimblewimble Verification,32768,,,809869792.0,ns,9918
+comparison,Mimblewimble Verification,32768,,,905352500.0,ns,11020

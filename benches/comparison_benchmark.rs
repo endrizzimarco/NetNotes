@@ -29,9 +29,9 @@ struct MWInputData {
 }
 
 fn inputs() -> Vec<InputData> {
-    let small = setup((8, 5), 2);
-    let medium = setup((4, 8), 2);
-    let large = setup((10, 5), 2);
+    let small = setup((2, 13), 2);
+    let medium = setup((8, 5), 2);
+    let large = setup((4, 8), 2);
 
     vec![small, medium, large]
 }
@@ -170,8 +170,8 @@ fn stxo_set(
     })
 }
 
-pub fn netnotes_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("netnotes");
+pub fn comparison_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("comparison");
     let mw_inputs = inputs()
         .iter()
         .map(|_| mw_setup(gen_blinding_factors(2)))
@@ -184,7 +184,7 @@ pub fn netnotes_benchmark(c: &mut Criterion) {
             |b, i| b.iter(|| gen_netnotes_transaction(black_box(i.clone()))),
         );
         group.bench_with_input(
-            BenchmarkId::new("Mimblewimble Generation", mw_i.inputs.len()),
+            BenchmarkId::new("Mimblewimble Generation", i.stxo_set.len()),
             mw_i,
             |b, i| b.iter(|| gen_mw_transaction(black_box(i.clone()))),
         );
@@ -196,7 +196,7 @@ pub fn netnotes_benchmark(c: &mut Criterion) {
             |b, _i| b.iter(|| transaction.verify(i.stxo_set.clone())),
         );
         group.bench_with_input(
-            BenchmarkId::new("Mimblewimble Verification", mw_i.inputs.len()),
+            BenchmarkId::new("Mimblewimble Verification", i.stxo_set.len()),
             mw_i,
             |b, _i| b.iter(|| mw_transaction.verify()),
         );
@@ -205,8 +205,8 @@ pub fn netnotes_benchmark(c: &mut Criterion) {
 }
 
 criterion_group! {
-  name = netnotes_benches;
+  name = comparison_benches;
   config = Criterion::default().sample_size(10);
-  targets = netnotes_benchmark
+  targets = comparison_benchmark
 }
-criterion_main!(netnotes_benches);
+criterion_main!(comparison_benches);

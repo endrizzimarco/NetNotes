@@ -1,0 +1,11 @@
+group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
+comparison,NetNotes Generation,65536,,,2974862041.0,ns,1
+comparison,NetNotes Generation,65536,,,2874193875.0,ns,1
+comparison,NetNotes Generation,65536,,,3132919375.0,ns,1
+comparison,NetNotes Generation,65536,,,3307730000.0,ns,1
+comparison,NetNotes Generation,65536,,,2837302500.0,ns,1
+comparison,NetNotes Generation,65536,,,3021507708.0,ns,1
+comparison,NetNotes Generation,65536,,,3100064167.0,ns,1
+comparison,NetNotes Generation,65536,,,2852312917.0,ns,1
+comparison,NetNotes Generation,65536,,,2839481375.0,ns,1
+comparison,NetNotes Generation,65536,,,3217062708.0,ns,1
