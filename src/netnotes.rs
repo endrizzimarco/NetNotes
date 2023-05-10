@@ -1,12 +1,12 @@
 #![allow(non_snake_case)]
-use super::pedersen;
-use super::pedersen::{Commitment, GeneralisedCommitment, GENS};
+use super::pedersen::{Commitment, GeneralisedCommitment, Pedersen, GENS, GENS_LARGE, GENS_MEDIUM};
 use super::schnorr::{GeneralisedSignature, Keypair, KeypairH, PublicKey, PublicKeyH};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 use merlin::Transcript;
-use one_of_many_proofs::proofs::{OneOfManyProof, OneOfManyProofs};
+use one_of_many_proofs::proofs::{OneOfManyProof, OneOfManyProofs, ProofGens};
 use rand::rngs::OsRng;
+// use std::mem;
 
 type Input = Commitment;
 type Output = GeneralisedCommitment;
@@ -71,19 +71,14 @@ impl Transaction {
     pub fn init(
         amount: Scalar,
         change: Scalar,
+        inputs: Vec<Input>,
         inputs_values: Vec<Scalar>,
         inputs_blinding_r: Vec<Scalar>,
         inputs_blinding_s: Vec<Scalar>,
         stxo_positions: Vec<usize>,
         stxo_set: Vec<GeneralisedCommitment>,
     ) -> TxData {
-        // Generate inputs by committing to the value and blinding factor
-        let inputs: Vec<Commitment> = inputs_values
-            .iter()
-            .zip(inputs_blinding_r.iter())
-            .map(|(v, r)| pedersen::commit_hj(*r, *v))
-            .collect();
-
+        let gens = Pedersen(derive_gens(&stxo_set).clone());
         // Generate Schnorr nonces
         let nonce_G = Keypair::generate();
         let nonce_H = KeypairH::generate();
@@ -92,19 +87,23 @@ impl Transaction {
         let s_output = Scalar::random(&mut OsRng);
 
         // Generate the senders' output commitment (change)
-        let change_output: Commitment = pedersen::generalised_commit(change, r_output, s_output);
+        let change_output: Commitment = gens.generalised_commit(change, r_output, s_output);
 
         // Calculate commitments to send to receiver for generating partial signature
         let blinding_diff = r_output - inputs_blinding_r.iter().sum::<Scalar>();
         let nonces_commitment = (nonce_G.public + nonce_H.public).0;
-        let excess_commitment = pedersen::commit(blinding_diff, s_output);
+        let excess_commitment = gens.commit(blinding_diff, s_output);
 
         // Generate schnorr proofs for every input proving the commitment is in the form r.H + v.J
         let schnorr_proofs = Self::generate_schnorr_proofs(inputs_values, inputs_blinding_r);
 
         // Generate ooom proofs for every input proving the knowledge of the openings of a commitment in the STXO set
-        let ooom_proofs =
-            Self::generate_ooom_proofs(stxo_set, stxo_positions, &inputs, inputs_blinding_s);
+        // mock a Vec<OneOfManyProof> if flag is set
+        let ooom_proofs = if cfg!(feature = "no_ooom_proofs") {
+            vec![]
+        } else {
+            Self::generate_ooom_proofs(stxo_set, stxo_positions, &inputs, inputs_blinding_s)
+        };
 
         TxData {
             inputs,
@@ -134,7 +133,7 @@ impl Transaction {
 
         // verify schnorr, ooom (validity/ownership of inputs) and kernel proofs (no money created or destroyed)
         self.verify_schnorr_proofs()
-            && self.verify_ooom_proofs(stxo_set)
+            && self.verify_ooom_proofs(&stxo_set)
             && verify_expected_kernel
             && verify_kernel_excess
     }
@@ -159,24 +158,25 @@ impl Transaction {
     }
 
     fn generate_ooom_proofs(
-        mut stxo_set: Vec<GeneralisedCommitment>,
+        stxo_set: Vec<GeneralisedCommitment>,
         pos: Vec<usize>,
         inputs: &Vec<Commitment>,
         blinding_factor_s: Vec<Scalar>,
     ) -> Vec<OneOfManyProof> {
+        let gens = derive_gens(&stxo_set);
+
         pos.iter()
             .zip(inputs.iter())
             .zip(blinding_factor_s.iter())
             .map(|((pos, input), blinding_factor_s)| {
                 // subtract the input from every element in the stxo set
-                stxo_set.iter_mut().for_each(|stxo| *stxo = *stxo - input);
                 stxo_set
-                    .iter()
-                    .prove(
-                        &GENS,
+                    .prove_with_offset(
+                        gens,
                         &mut Transcript::new(b"OneOfMany"),
                         *pos,
                         &blinding_factor_s,
+                        Some(input),
                     )
                     .unwrap()
             })
@@ -184,18 +184,25 @@ impl Transaction {
     }
 
     // Verify that every input commitment is stored in the STXO set
-    fn verify_ooom_proofs(&self, stxo_set: Vec<GeneralisedCommitment>) -> bool {
-        self.inputs
+    fn verify_ooom_proofs(&self, stxo_set: &Vec<GeneralisedCommitment>) -> bool {
+        let gens = derive_gens(stxo_set);
+        let mut t = Transcript::new(b"OneOfMany");
+
+        // for every inputs return Some(&input)
+        let inputs = self
+            .inputs
             .iter()
-            .zip(self.ooom_proofs.iter())
-            .all(|(input, proof)| {
-                let mut stxo_set = stxo_set.clone();
-                stxo_set.iter_mut().for_each(|stxo| *stxo = *stxo - input);
-                stxo_set
-                    .iter()
-                    .verify(&GENS, &mut Transcript::new(b"OneOfMany"), &proof)
-                    .is_ok()
-            })
+            .map(|input| Some(input))
+            .collect::<Vec<_>>();
+
+        stxo_set
+            .verify_batch_with_offsets(
+                gens,
+                &mut t,
+                &self.ooom_proofs.as_slice(),
+                inputs.as_slice(),
+            )
+            .is_ok()
     }
 }
 
@@ -212,7 +219,8 @@ impl TxData {
 impl SendData {
     /// The receiver adds their output & rangeproof, and commits to their public nonce and excess.
     /// It then updates the total kernel commitment, and signs for their half of the kernel.
-    pub fn respond(data: &SendData) -> ResponseData {
+    pub fn respond(data: &SendData, stxo_set: &Vec<GeneralisedCommitment>) -> ResponseData {
+        let gens = Pedersen(derive_gens(stxo_set).clone());
         // Generate blinding factors for output
         let s_keypair = Keypair::generate();
         let r_keypair = KeypairH::generate();
@@ -221,7 +229,7 @@ impl SendData {
         let nonce_H = KeypairH::generate();
 
         let output_commitment: GeneralisedCommitment =
-            pedersen::generalised_commit(data.amount, r_keypair.private, s_keypair.private);
+            gens.generalised_commit(data.amount, r_keypair.private, s_keypair.private);
 
         let excess_commitment = (s_keypair.public + r_keypair.public).0;
         let nonces_commitment = (nonce_G.public + nonce_H.public).0;
@@ -276,33 +284,45 @@ impl ResponseData {
         );
         let signature = GeneralisedSignature::aggregate(vec![&partial_sig, &resp.partial_sig]);
 
-        Transaction {
+        let transaction = Transaction {
             inputs: tx.inputs.clone(),
             schnorr_proofs: tx.schnorr_proofs.clone(),
             ooom_proofs: tx.ooom_proofs.clone(),
             outputs: vec![tx.change_output, resp.output_commitment],
             kernel: Kernel { excess, signature },
-        }
+        };
+        // println!("inputs size: {:?}", transaction.inputs.len());
+        // let size = mem::size_of_val(&*transaction.inputs)
+        //     + mem::size_of_val(&*transaction.outputs)
+        //     + mem::size_of_val(&*transaction.schnorr_proofs)
+        //     + mem::size_of_val(&*transaction.ooom_proofs)
+        //     + mem::size_of_val(&transaction.kernel.excess)
+        //     + mem::size_of_val(&transaction.kernel.signature);
+        // println!("size: {:?}", size);
+        transaction
     }
 }
 
-// #[cfg(test)]
+fn derive_gens(stxo_set: &Vec<GeneralisedCommitment>) -> &'static ProofGens {
+    let len = stxo_set.len() as u32;
+    match len {
+        8192 => &GENS.0,
+        32768 => &GENS_MEDIUM.0,
+        65536 => &GENS_LARGE.0,
+        _ => panic!("Unsupported number of bits"),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_schnorr_proofs() {
-        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+        let (amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set) =
             common_transaction_setup();
-
         let tx_data = Transaction::init(
-            amount,
-            change,
-            inputs_values,
-            inputs_blinding_r,
-            inputs_blinding_s,
-            pos,
-            stxo_set,
+            amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set,
         );
 
         let transaction = mock_tx(tx_data);
@@ -311,22 +331,15 @@ mod tests {
 
     #[test]
     fn test_invalid_schnorr_proofs() {
-        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+        let (amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set) =
             common_transaction_setup();
-
         let tx_data = Transaction::init(
-            amount,
-            change,
-            inputs_values,
-            inputs_blinding_r,
-            inputs_blinding_s,
-            pos,
-            stxo_set,
+            amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set,
         );
 
         let mut transaction = mock_tx(tx_data);
         // Add a second blinding factor to the first input
-        transaction.inputs[0] = pedersen::generalised_commit(
+        transaction.inputs[0] = GENS.generalised_commit(
             Scalar::from(120u64),
             Scalar::from(10u64),
             Scalar::from(1u64),
@@ -336,57 +349,37 @@ mod tests {
 
     #[test]
     fn test_valid_ooom_proofs() {
-        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+        let (amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set) =
             common_transaction_setup();
-
+        let clone = stxo_set.clone();
         let tx_data = Transaction::init(
-            amount,
-            change,
-            inputs_values,
-            inputs_blinding_r,
-            inputs_blinding_s,
-            pos,
-            stxo_set.clone(),
+            amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set,
         );
 
         let transaction = mock_tx(tx_data);
-        assert!(transaction.verify_ooom_proofs(stxo_set));
+        assert!(transaction.verify_ooom_proofs(&clone));
     }
 
     #[test]
     fn test_invalid_ooom_proofs() {
-        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+        let (amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set) =
             common_transaction_setup();
-
+        let clone = stxo_set.clone();
         let tx_data = Transaction::init(
-            amount,
-            change,
-            inputs_values,
-            inputs_blinding_r,
-            inputs_blinding_s,
-            pos,
-            stxo_set.clone(),
+            amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set,
         );
-
         let mut transaction = mock_tx(tx_data);
         // Add a second blinding factor to the first input
-        transaction.inputs[0] = pedersen::commit_hj(Scalar::from(120u64), Scalar::from(11u64));
-        assert!(!transaction.verify_ooom_proofs(stxo_set));
+        transaction.inputs[0] = GENS.commit_hj(Scalar::from(120u64), Scalar::from(11u64));
+        assert!(!transaction.verify_ooom_proofs(&clone));
     }
 
     #[test]
     fn test_send_transaction() {
-        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+        let (amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set) =
             common_transaction_setup();
-
         let tx_data = Transaction::init(
-            amount,
-            change,
-            inputs_values,
-            inputs_blinding_r,
-            inputs_blinding_s,
-            pos,
-            stxo_set.clone(),
+            amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set,
         );
 
         let send_data = tx_data.send();
@@ -400,16 +393,11 @@ mod tests {
     #[test]
     fn test_finalise_transaction() {
         // mock tx data
-        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+        let (amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set) =
             common_transaction_setup();
+        let clone = stxo_set.clone();
         let tx_data = Transaction::init(
-            amount,
-            change,
-            inputs_values,
-            inputs_blinding_r,
-            inputs_blinding_s,
-            pos,
-            stxo_set.clone(),
+            amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set,
         );
         let send_data = tx_data.send();
 
@@ -433,7 +421,7 @@ mod tests {
             &other_blinding_h.private,
             challenge,
         );
-        let output_commitment = pedersen::generalised_commit(
+        let output_commitment = GENS.generalised_commit(
             send_data.amount,
             other_blinding_h.private,
             other_blinding.private,
@@ -458,23 +446,17 @@ mod tests {
             transaction.kernel.excess,
             tx_data.excess_commitment + excess_commitment
         );
-        assert!(transaction.verify(stxo_set));
+        assert!(transaction.verify(clone));
     }
 
     #[test]
     #[should_panic(expected = "Signature verification failed")]
     fn test_incorrect_response() {
         // mock tx data
-        let (amount, change, inputs_values, inputs_blinding_r, inputs_blinding_s, pos, stxo_set) =
+        let (amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set) =
             common_transaction_setup();
         let tx_data = Transaction::init(
-            amount,
-            change,
-            inputs_values,
-            inputs_blinding_r,
-            inputs_blinding_s,
-            pos,
-            stxo_set.clone(),
+            amount, change, inputs, values, blinding_r, blinding_s, pos, stxo_set,
         );
 
         // mock response data
@@ -497,7 +479,7 @@ mod tests {
             &other_blinding_h.private,
             challenge,
         );
-        let output_commitment = pedersen::generalised_commit(
+        let output_commitment = GENS.generalised_commit(
             tx_data.amount,
             other_blinding_h.private,
             other_blinding.private,
@@ -525,8 +507,8 @@ mod tests {
         );
         let signature =
             GeneralisedSignature::new_excess_proof(keypair, keypair_H, &ten, &ten, challenge);
-        let input = pedersen::commit_hj(ten, Scalar::from(150u64));
-        let stxo_set = mock_stxo_set(&vec![0], &vec![input + pedersen::commit_G(ten)]);
+        let input = GENS.commit_hj(ten, Scalar::from(150u64));
+        let stxo_set = mock_stxo_set(&vec![0], &vec![input + GENS.commit_G(ten)]);
 
         let transaction = Transaction {
             inputs: vec![input],
@@ -541,8 +523,8 @@ mod tests {
                 vec![ten],
             ),
             outputs: vec![
-                pedersen::generalised_commit(Scalar::from(50u64), ten, ten),
-                pedersen::generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
+                GENS.generalised_commit(Scalar::from(50u64), ten, ten),
+                GENS.generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
             ],
             kernel: Kernel {
                 excess: PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0,
@@ -565,8 +547,8 @@ mod tests {
         );
         let signature =
             GeneralisedSignature::new_excess_proof(keypair, keypair_H, &ten, &ten, challenge);
-        let input = pedersen::commit_hj(ten, Scalar::from(149u64));
-        let stxo_set = mock_stxo_set(&vec![0], &vec![input + pedersen::commit_G(ten)]);
+        let input = GENS.commit_hj(ten, Scalar::from(149u64));
+        let stxo_set = mock_stxo_set(&vec![0], &vec![input + GENS.commit_G(ten)]);
 
         let transaction = Transaction {
             inputs: vec![input],
@@ -581,8 +563,8 @@ mod tests {
                 vec![ten],
             ),
             outputs: vec![
-                pedersen::generalised_commit(Scalar::from(50u64), ten, ten),
-                pedersen::generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
+                GENS.generalised_commit(Scalar::from(50u64), ten, ten),
+                GENS.generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
             ],
             kernel: Kernel {
                 excess: PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0,
@@ -610,8 +592,8 @@ mod tests {
             &ten,
             challenge,
         );
-        let input = pedersen::commit_hj(ten, Scalar::from(149u64));
-        let stxo_set = mock_stxo_set(&vec![0], &vec![input + pedersen::commit_G(ten)]);
+        let input = GENS.commit_hj(ten, Scalar::from(149u64));
+        let stxo_set = mock_stxo_set(&vec![0], &vec![input + GENS.commit_G(ten)]);
 
         let transaction = Transaction {
             inputs: vec![input],
@@ -626,8 +608,8 @@ mod tests {
                 vec![ten],
             ),
             outputs: vec![
-                pedersen::generalised_commit(Scalar::from(50u64), ten, ten),
-                pedersen::generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
+                GENS.generalised_commit(Scalar::from(50u64), ten, ten),
+                GENS.generalised_commit(Scalar::from(100u64), ten, Scalar::zero()),
             ],
             kernel: Kernel {
                 excess: PublicKey::from_private_key(ten).0 + PublicKeyH::from_private_key(ten).0,
@@ -658,10 +640,8 @@ mod tests {
         l: &Vec<usize>,
         C_stxo: &Vec<GeneralisedCommitment>,
     ) -> Vec<GeneralisedCommitment> {
-        let set = (1..GENS.max_set_size() - C_stxo.len() + 1)
-            .map(|_| {
-                RistrettoPoint::random(&mut OsRng) + pedersen::commit_J(Scalar::random(&mut OsRng))
-            })
+        let set = (0..GENS.0.max_set_size() - C_stxo.len())
+            .map(|_| RistrettoPoint::random(&mut OsRng) + GENS.commit_J(Scalar::random(&mut OsRng)))
             .collect::<Vec<GeneralisedCommitment>>();
 
         l.iter().zip(C_stxo.iter()).fold(set, |mut acc, (l, C_in)| {
@@ -674,6 +654,7 @@ mod tests {
     fn common_transaction_setup() -> (
         Scalar,
         Scalar,
+        Vec<Input>,
         Vec<Scalar>,
         Vec<Scalar>,
         Vec<Scalar>,
@@ -685,16 +666,21 @@ mod tests {
         let input_values = vec![Scalar::from(120u64), Scalar::from(30u64)];
         let input_blinding_r = vec![Scalar::from(10u64), Scalar::from(15u64)];
         let input_blinding_s = vec![Scalar::from(1u64), Scalar::from(2u64)];
+        let inputs = vec![
+            GENS.commit_hj(input_blinding_r[0], input_values[0]),
+            GENS.commit_hj(input_blinding_r[1], input_values[1]),
+        ];
         let pos = vec![0, 1];
 
         let stxo_outputs = vec![
-            pedersen::generalised_commit(input_values[0], input_blinding_r[0], input_blinding_s[0]),
-            pedersen::generalised_commit(input_values[1], input_blinding_r[1], input_blinding_s[1]),
+            GENS.generalised_commit(input_values[0], input_blinding_r[0], input_blinding_s[0]),
+            GENS.generalised_commit(input_values[1], input_blinding_r[1], input_blinding_s[1]),
         ];
         let stxo_set = mock_stxo_set(&pos, &stxo_outputs);
         (
             amount,
             change,
+            inputs,
             input_values,
             input_blinding_r,
             input_blinding_s,

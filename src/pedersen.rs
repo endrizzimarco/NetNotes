@@ -13,16 +13,16 @@ lazy_static! {
     static ref J: RistrettoBasepointTable = RistrettoBasepointTable::create(
         &RistrettoPoint::hash_from_bytes::<Keccak512>(G.compress().as_bytes())
     );
-    pub static ref GENS: Pedersen = Pedersen::new(5);
-    pub static ref GENS_MEDIUM: Pedersen = Pedersen::new(8);
-    pub static ref GENS_LARGE: Pedersen = Pedersen::new(10);
+    pub static ref GENS: Pedersen = Pedersen::new(2, 13);
+    pub static ref GENS_MEDIUM: Pedersen = Pedersen::new(8, 5);
+    pub static ref GENS_LARGE: Pedersen = Pedersen::new(4, 8);
 }
 
 pub struct Pedersen(pub ProofGens);
 
 impl Pedersen {
-    pub fn new(n_bits: usize) -> Self {
-        Pedersen(ProofGens::new(n_bits).unwrap())
+    pub fn new(n_base: usize, n_bits: usize) -> Self {
+        Pedersen(ProofGens::new(n_base, n_bits).unwrap())
     }
 
     // s.G + r.H + v.J

@@ -3,6 +3,7 @@ use super::schnorr::{Keypair, PublicKey, Signature};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 use rand::rngs::OsRng;
+// use std::mem;
 
 pub struct Transaction {
     inputs: Vec<Input>,
@@ -55,7 +56,6 @@ impl PointAddition for Vec<RistrettoPoint> {
 
 impl Transaction {
     /// Sender commits to amount, fee, and a public nonce, public excess.
-    /// It could also commit to tx offset, inputs, change output, and probably others.
     pub fn init(
         amount: Scalar,
         change: Scalar,
@@ -85,12 +85,8 @@ impl Transaction {
     }
 
     pub fn verify(&self) -> bool {
-        // Check if the transaction kernel is valid
-        let kernel = &self.kernel;
-        let excess = kernel.excess;
-        let signature = &kernel.signature;
-
-        let challenge = Signature::calculate_challenge(&signature.R, &excess);
+        let excess = self.kernel.excess;
+        let signature = &self.kernel.signature;
 
         // get outputs - inputs
         let expected_excess = PublicKey(
@@ -98,10 +94,10 @@ impl Transaction {
                 - self.inputs.iter().sum::<RistrettoPoint>(),
         );
 
+        let challenge = Signature::calculate_challenge(&signature.R, &excess);
         let verify_kernel_excess = Signature::verify(signature, &excess, challenge);
-        let verify_expected_excess = Signature::verify(signature, &expected_excess, challenge);
 
-        (expected_excess == excess) && verify_kernel_excess && verify_expected_excess
+        (expected_excess == excess) && verify_kernel_excess
     }
 }
 
@@ -154,14 +150,21 @@ impl ResponseData {
             Signature::new(&tx.nonce_keypair, &tx.blinding_keypair.private, challenge);
         let signature = Signature::aggregate(vec![&partial_sig, &resp.partial_sig]);
 
-        Transaction {
+        let transaction = Transaction {
             inputs: tx.inputs.clone(),
             outputs: vec![tx.change_output, resp.output_commitment],
             kernel: Kernel {
                 excess: blinding_sum,
                 signature,
             },
-        }
+        };
+        // println!("size inputs: {:?}", transaction.inputs.len());
+        // let size = mem::size_of_val(&*transaction.inputs)
+        //     + mem::size_of_val(&*transaction.outputs)
+        //     + mem::size_of_val(&transaction.kernel.excess)
+        //     + mem::size_of_val(&transaction.kernel.signature);
+        // println!("size: {:?}", size);
+        transaction
     }
 }
 

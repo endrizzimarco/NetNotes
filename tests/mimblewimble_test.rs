@@ -4,7 +4,7 @@ use netnotes::pedersen::{Commitment, GENS};
 use rand::rngs::OsRng;
 
 fn setup() -> (Vec<Scalar>, Vec<Scalar>, Vec<Commitment>) {
-    let blinding_factors = (0..10)
+    let blinding_factors = (0..2)
         .map(|_| Scalar::random(&mut OsRng))
         .collect::<Vec<Scalar>>();
 
@@ -32,7 +32,7 @@ fn test_valid_transaction() {
     // pick change as 1
     let change = Scalar::one();
 
-    // sum values to an integer and subtract change
+    // get total amount for receiver
     let amount = values.iter().fold(Scalar::zero(), |acc, x| acc + x) - change;
 
     // Simulate transaction

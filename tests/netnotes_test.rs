@@ -71,7 +71,7 @@ fn test_valid_transaction() {
         stxo_set.clone(),
     );
     let send_data = tx_data.send();
-    let response_data = SendData::respond(&send_data);
+    let response_data = SendData::respond(&send_data, &stxo_set);
     let transaction = ResponseData::finalise(&tx_data, &response_data);
 
     assert!(transaction.verify(stxo_set));
@@ -97,7 +97,7 @@ fn test_transaction_no_change() {
         stxo_set.clone(),
     );
     let send_data = tx_data.send();
-    let response_data = SendData::respond(&send_data);
+    let response_data = SendData::respond(&send_data, &stxo_set);
     let transaction = ResponseData::finalise(&tx_data, &response_data);
 
     assert!(transaction.verify(stxo_set));
@@ -124,7 +124,7 @@ fn test_transaction_over_amount() {
         stxo_set.clone(),
     );
     let send_data = tx_data.send();
-    let response_data = SendData::respond(&send_data);
+    let response_data = SendData::respond(&send_data, &stxo_set);
     let transaction = ResponseData::finalise(&tx_data, &response_data);
 
     assert!(transaction.verify(stxo_set));
@@ -162,7 +162,7 @@ fn test_transaction_modified_input() {
         stxo_set.clone(),
     );
     let send_data = tx_data.send();
-    let response_data = SendData::respond(&send_data);
+    let response_data = SendData::respond(&send_data, &stxo_set);
     let transaction = ResponseData::finalise(&tx_data, &response_data);
 
     assert!(transaction.verify(stxo_set));
@@ -197,7 +197,7 @@ fn test_transaction_wrong_blinding_factor() {
         stxo_set.clone(),
     );
     let send_data = tx_data.send();
-    let response_data = SendData::respond(&send_data);
+    let response_data = SendData::respond(&send_data, &stxo_set);
     let transaction = ResponseData::finalise(&tx_data, &response_data);
 
     assert!(transaction.verify(stxo_set));

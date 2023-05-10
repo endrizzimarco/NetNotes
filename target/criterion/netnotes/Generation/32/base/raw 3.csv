@@ -1,0 +1,11 @@
+group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
+netnotes,Generation,32,,,106207250.0,ns,7
+netnotes,Generation,32,,,211286666.0,ns,14
+netnotes,Generation,32,,,318413292.0,ns,21
+netnotes,Generation,32,,,424944167.0,ns,28
+netnotes,Generation,32,,,528996208.0,ns,35
+netnotes,Generation,32,,,635228042.0,ns,42
+netnotes,Generation,32,,,741414666.0,ns,49
+netnotes,Generation,32,,,844681667.0,ns,56
+netnotes,Generation,32,,,955531125.0,ns,63
+netnotes,Generation,32,,,1056282125.0,ns,70

@@ -5,13 +5,6 @@ use netnotes::netnotes::{ResponseData, SendData, Transaction};
 use netnotes::pedersen::{Commitment, GeneralisedCommitment, GENS};
 use rand::rngs::OsRng;
 
-#[derive(Copy, Clone)]
-enum SetSize {
-    Small,
-    Medium,
-    Large,
-}
-
 #[derive(Clone)]
 struct InputData {
     amount: Scalar,
@@ -24,28 +17,15 @@ struct InputData {
     stxo_set: Vec<GeneralisedCommitment>,
 }
 fn inputs() -> Vec<InputData> {
-    let small = setup(SetSize::Small, 2);
-    let medium = setup(SetSize::Medium, 2);
-    let large = setup(SetSize::Large, 2);
+    let small = setup((2, 13), 2);
+    let medium = setup((8, 5), 2);
+    let large = setup((4, 8), 2);
 
     vec![small, medium, large]
 }
 
-fn inputs_different_input_sizes() -> Vec<InputData> {
-    let small = setup(SetSize::Small, 100000);
-    let medium = setup(SetSize::Small, 200000);
-    let large = setup(SetSize::Small, 300000000);
-
-    vec![small, medium, large]
-}
-
-fn setup(size: SetSize, inputs_n: u32) -> InputData {
-    let size = match size {
-        SetSize::Small => 5 as usize,
-        SetSize::Medium => 8 as usize,
-        SetSize::Large => 10 as usize,
-    };
-    let set_size = 2u32.pow(size as u32) as usize;
+fn setup(size: (usize, usize), inputs_n: u32) -> InputData {
+    let set_size = size.0.pow(size.1 as u32) as usize;
 
     let mut rng = OsRng;
     let r_blinding = (0..inputs_n)
@@ -79,7 +59,7 @@ fn setup(size: SetSize, inputs_n: u32) -> InputData {
 
     // create a vector<usize> of length inputs_n with random values between 0 and size
     let positions = (0..inputs_n)
-        .map(|_| rand::random::<usize>() % size as usize)
+        .map(|_| rand::random::<usize>() % size.0 as usize)
         .collect::<Vec<usize>>();
 
     let stxo_set = stxo_set(&positions, &stxo_inputs, set_size);

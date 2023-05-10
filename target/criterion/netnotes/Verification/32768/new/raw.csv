@@ -1,0 +1,11 @@
+group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
+netnotes,Verification,32768,,,759926084.0,ns,2
+netnotes,Verification,32768,,,756003208.0,ns,2
+netnotes,Verification,32768,,,752437041.0,ns,2
+netnotes,Verification,32768,,,758643500.0,ns,2
+netnotes,Verification,32768,,,753448333.0,ns,2
+netnotes,Verification,32768,,,751717500.0,ns,2
+netnotes,Verification,32768,,,750077459.0,ns,2
+netnotes,Verification,32768,,,765101625.0,ns,2
+netnotes,Verification,32768,,,799630542.0,ns,2
+netnotes,Verification,32768,,,797566583.0,ns,2
