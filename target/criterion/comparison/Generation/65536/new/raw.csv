@@ -1,0 +1,11 @@
+group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
+comparison,Generation,65536,,,2952697125.0,ns,1
+comparison,Generation,65536,,,3908205500.0,ns,1
+comparison,Generation,65536,,,2960482958.0,ns,1
+comparison,Generation,65536,,,2919175833.0,ns,1
+comparison,Generation,65536,,,2943539333.0,ns,1
+comparison,Generation,65536,,,2944778958.0,ns,1
+comparison,Generation,65536,,,2924882709.0,ns,1
+comparison,Generation,65536,,,2877429375.0,ns,1
+comparison,Generation,65536,,,2845813375.0,ns,1
+comparison,Generation,65536,,,2911305292.0,ns,1

@@ -1,6 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
+use netnotes::mimblewimble::{
+    ResponseData as MWResponse, SendData as MWSend, Transaction as MWTransaction,
+};
 use netnotes::netnotes::{ResponseData, SendData, Transaction};
 use netnotes::pedersen::{Commitment, GeneralisedCommitment, GENS};
 use rand::rngs::OsRng;
@@ -16,12 +19,70 @@ struct InputData {
     positions: Vec<usize>,
     stxo_set: Vec<GeneralisedCommitment>,
 }
+
+#[derive(Clone)]
+struct MWInputData {
+    amount: Scalar,
+    change: Scalar,
+    blinding_factors: Vec<Scalar>,
+    inputs: Vec<Commitment>,
+}
+
 fn inputs() -> Vec<InputData> {
     let small = setup((8, 5), 2);
     let medium = setup((4, 8), 2);
     let large = setup((10, 5), 2);
 
     vec![small, medium, large]
+}
+
+fn mw_setup(blinding_factors: Vec<Scalar>) -> MWInputData {
+    // create a vector of random values same size of blinding_factors vector
+    let values = blinding_factors
+        .iter()
+        .map(|_| Scalar::random(&mut OsRng))
+        .collect::<Vec<Scalar>>();
+
+    // create inputs with values and blinding factors
+    let inputs = values
+        .iter()
+        .zip(blinding_factors.iter())
+        .map(|(value, blinding_factor)| GENS.commit(*value, *blinding_factor))
+        .collect::<Vec<Commitment>>();
+
+    // pick change as 1
+    let change = Scalar::one();
+
+    // sum values to an integer and subtract change
+    let amount = values.iter().fold(Scalar::zero(), |acc, x| acc + x) - change;
+
+    MWInputData {
+        amount,
+        change,
+        blinding_factors,
+        inputs,
+    }
+}
+
+fn gen_blinding_factors(n: u32) -> Vec<Scalar> {
+    (0..n)
+        .map(|_| Scalar::random(&mut OsRng))
+        .collect::<Vec<Scalar>>()
+}
+
+fn gen_mw_transaction(input: MWInputData) -> MWTransaction {
+    // Simulate transaction
+    let tx_data = MWTransaction::init(
+        input.amount,
+        input.change,
+        input.blinding_factors,
+        input.inputs,
+    );
+    let send_data = tx_data.send();
+    let response_data = MWSend::respond(&send_data);
+    let transaction = MWResponse::finalise(&tx_data, &response_data);
+
+    transaction
 }
 
 fn setup(size: (usize, usize), inputs_n: u32) -> InputData {
@@ -111,18 +172,33 @@ fn stxo_set(
 
 pub fn netnotes_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("netnotes");
-
-    for i in inputs().iter() {
+    let mw_inputs = inputs()
+        .iter()
+        .map(|_| mw_setup(gen_blinding_factors(2)))
+        .collect::<Vec<_>>();
+    let inputs = inputs().clone();
+    for (i, mw_i) in inputs.iter().zip(mw_inputs.iter()) {
         group.bench_with_input(
-            BenchmarkId::new("Generation", i.stxo_set.len()),
+            BenchmarkId::new("NetNotes Generation", i.stxo_set.len()),
             i,
             |b, i| b.iter(|| gen_netnotes_transaction(black_box(i.clone()))),
         );
-        let transaction = gen_netnotes_transaction(i.clone());
         group.bench_with_input(
-            BenchmarkId::new("Verification", i.stxo_set.len()),
+            BenchmarkId::new("Mimblewimble Generation", mw_i.inputs.len()),
+            mw_i,
+            |b, i| b.iter(|| gen_mw_transaction(black_box(i.clone()))),
+        );
+        let transaction = gen_netnotes_transaction(i.clone());
+        let mw_transaction = gen_mw_transaction(mw_i.clone());
+        group.bench_with_input(
+            BenchmarkId::new("NetNotes Verification", i.stxo_set.len()),
             i,
             |b, _i| b.iter(|| transaction.verify(i.stxo_set.clone())),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("Mimblewimble Verification", mw_i.inputs.len()),
+            mw_i,
+            |b, _i| b.iter(|| mw_transaction.verify()),
         );
     }
     group.finish()
