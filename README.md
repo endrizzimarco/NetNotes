@@ -3,6 +3,8 @@
 A novel cryptographic protocol enabling private transactions. Based on Mimblewimble, it uses one-out-of-many-proof by Jens Groth to achieve
 fully private transactions by adding untraceability to the protocol.
 
+:warning: This only serves as a proof of concept and is not intended to be used in production. ::warning::
+
 ## Run benchmarks
 
 Make sure to optimise elliptic curve operations by compiling to use the SIMD backend:
