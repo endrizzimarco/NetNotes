@@ -1,11 +1,11 @@
 group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
-comparison,Mimblewimble Verification,65536,,,102586250.0,ns,1114
-comparison,Mimblewimble Verification,65536,,,181486125.0,ns,2228
-comparison,Mimblewimble Verification,65536,,,273933292.0,ns,3342
-comparison,Mimblewimble Verification,65536,,,362945000.0,ns,4456
-comparison,Mimblewimble Verification,65536,,,455076166.0,ns,5570
-comparison,Mimblewimble Verification,65536,,,546863541.0,ns,6684
-comparison,Mimblewimble Verification,65536,,,635740750.0,ns,7798
-comparison,Mimblewimble Verification,65536,,,727912959.0,ns,8912
-comparison,Mimblewimble Verification,65536,,,818334708.0,ns,10026
-comparison,Mimblewimble Verification,65536,,,913894500.0,ns,11140
+comparison,Mimblewimble Verification,65536,,,83480708.0,ns,958
+comparison,Mimblewimble Verification,65536,,,156355500.0,ns,1916
+comparison,Mimblewimble Verification,65536,,,235971916.0,ns,2874
+comparison,Mimblewimble Verification,65536,,,312095750.0,ns,3832
+comparison,Mimblewimble Verification,65536,,,390031959.0,ns,4790
+comparison,Mimblewimble Verification,65536,,,511277208.0,ns,5748
+comparison,Mimblewimble Verification,65536,,,559291416.0,ns,6706
+comparison,Mimblewimble Verification,65536,,,629021375.0,ns,7664
+comparison,Mimblewimble Verification,65536,,,708265209.0,ns,8622
+comparison,Mimblewimble Verification,65536,,,922058709.0,ns,9580

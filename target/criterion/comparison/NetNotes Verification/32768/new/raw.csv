@@ -1,11 +1,11 @@
 group,function,value,throughput_num,throughput_type,sample_measured_value,unit,iteration_count
-comparison,NetNotes Verification,32768,,,760121417.0,ns,2
-comparison,NetNotes Verification,32768,,,747177666.0,ns,2
-comparison,NetNotes Verification,32768,,,755405584.0,ns,2
-comparison,NetNotes Verification,32768,,,752449875.0,ns,2
-comparison,NetNotes Verification,32768,,,747868375.0,ns,2
-comparison,NetNotes Verification,32768,,,746642083.0,ns,2
-comparison,NetNotes Verification,32768,,,748184375.0,ns,2
-comparison,NetNotes Verification,32768,,,748145625.0,ns,2
-comparison,NetNotes Verification,32768,,,747743916.0,ns,2
-comparison,NetNotes Verification,32768,,,744823958.0,ns,2
+comparison,NetNotes Verification,32768,,,753566333.0,ns,2
+comparison,NetNotes Verification,32768,,,746215959.0,ns,2
+comparison,NetNotes Verification,32768,,,742659417.0,ns,2
+comparison,NetNotes Verification,32768,,,750572208.0,ns,2
+comparison,NetNotes Verification,32768,,,756432125.0,ns,2
+comparison,NetNotes Verification,32768,,,752714833.0,ns,2
+comparison,NetNotes Verification,32768,,,776135459.0,ns,2
+comparison,NetNotes Verification,32768,,,740122000.0,ns,2
+comparison,NetNotes Verification,32768,,,745663333.0,ns,2
+comparison,NetNotes Verification,32768,,,760147250.0,ns,2

@@ -29,9 +29,9 @@ struct MWInputData {
 }
 
 fn inputs() -> Vec<InputData> {
-    let small = setup((2, 13), 2);
-    let medium = setup((8, 5), 2);
-    let large = setup((4, 8), 2);
+    let small = setup((2, 13), 1);
+    let medium = setup((8, 5), 1);
+    let large = setup((4, 8), 1);
 
     vec![small, medium, large]
 }
@@ -174,7 +174,7 @@ pub fn comparison_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("comparison");
     let mw_inputs = inputs()
         .iter()
-        .map(|_| mw_setup(gen_blinding_factors(2)))
+        .map(|_| mw_setup(gen_blinding_factors(1)))
         .collect::<Vec<_>>();
     let inputs = inputs().clone();
     for (i, mw_i) in inputs.iter().zip(mw_inputs.iter()) {
